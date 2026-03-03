@@ -38,3 +38,4 @@ main_code/attack/XOXO_Attack/
 *.pth
 *.pkl
 *.npy
+*.bin
