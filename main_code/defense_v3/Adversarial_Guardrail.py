@@ -12,14 +12,14 @@ class AdversarialGuardrail:
         self.adversarial_threshold = args.adversarial_threshold
         self.th_string_hard = args.th_string_hard
 
-        # --- 新增白名單特徵 ---
+        # 擴充白名單：加入常見的 C/C++ 註解前綴與標記
         self.docstring_keywords = [
             '>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 
-            'Given a', 'For a', 'Calculate', 'is a palindrome'
+            'Given a', 'For a', 'Calculate', 'is a palindrome',
+            'TODO', 'FIXME', 'XXX', 'NOTE', 'Copyright', 'License', 'Author'
         ]
 
     def get_token_losses(self, input_ids):
-        # ... (保持原樣)
         with torch.no_grad():
             outputs = self.model(input_ids, labels=input_ids)
             shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -28,21 +28,28 @@ class AdversarialGuardrail:
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.cpu().numpy()
 
-    def calc_mink_score(self, text, k=0.2):
-        if not text or len(text) < 4: return 0.0
+    def calc_mink_score(self, text, k=0.5): # 這裡將 k 從 0.2 放寬到 0.5，平滑極端值
+        if not text or len(text) < 10: 
+            return 0.0
+            
         inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-        if inputs["input_ids"].shape[1] <= 2: return 0.0
+        
+        # 如果 Token 數量太少（小於 5 個），不具備統計意義，直接放行
+        if inputs["input_ids"].shape[1] < 5: 
+            return 0.0
+            
         losses = self.get_token_losses(inputs["input_ids"])
-        if len(losses) == 0: return 0.0
+        if len(losses) == 0: 
+            return 0.0
+            
         sorted_losses = np.sort(losses)[::-1]
         num_tokens = max(1, int(len(losses) * k))
         top_k_losses = sorted_losses[:num_tokens]
         return np.mean(top_k_losses)
 
     def is_whitelisted(self, text):
-        """判斷是否為白名單內的 Docstring"""
-        keywords = ['>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 'Given a', 'Calculate']
-        return any(kw in text for kw in keywords) or text.count('>>>') >= 1
+        """判斷是否為白名單內的常見標記"""
+        return any(kw.lower() in text.lower() for kw in self.docstring_keywords) or text.count('>>>') >= 1
 
     def detect(self, code):
         """執行 Adversarial 檢測，並回傳詳細偵測資訊"""
@@ -59,18 +66,24 @@ class AdversarialGuardrail:
         
         replacements = [] 
         triggered = False
-        adv_debug = [] # 新增：存放偵測細節
+        adv_debug = [] 
         
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
-            if len(text) < 6: continue 
+            
+            # 【關鍵修改】長度過濾：一般的惡意提示注入都會超過 35 個字元。
+            # 大幅減少對短註解 (如 /* residual */, // Back Chain) 的誤判
+            if type_name == 'comment' and len(text) < 35: 
+                continue 
+            if type_name == 'string' and len(text) < 15:
+                continue
 
-            score = self.calc_mink_score(text, k=0.2)
+            score = self.calc_mink_score(text, k=0.5)
             current_threshold = self.adversarial_threshold
             whitelisted = self.is_whitelisted(text)
             
             if type_name == 'comment' and whitelisted:
-                current_threshold *= 2.5 # 白名單加權
+                current_threshold *= 2.0 # 白名單加權
             
             # 判定是否觸發
             is_this_triggered = False

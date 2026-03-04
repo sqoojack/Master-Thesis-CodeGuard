@@ -8,8 +8,6 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     -i Dataset/XOXO_attack/XOXO_defect_detection_codebert.jsonl \
     -o result/sanitized_data/CodeGuard_sanitized_XOXO_0.02_0.05.jsonl
     
-""" 
-"""
 ShadowCode:
 CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
     -A 9 \
@@ -17,6 +15,14 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
     -L3_t 100.05 \
     -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
     -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
+    
+Merged:
+CUDA_VISIBLE_DEVICES=1 python main_code/defense_v3/main.py \
+    -A 12.8 \
+    -L3_b 0.025 \
+    -L3_t 0.10 \
+    -i Dataset/merged_all/merged_dataset.jsonl \
+    -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
 """ 
 
 import os
@@ -29,7 +35,7 @@ from tree_sitter import Language, Parser
 from datetime import datetime
 
 # Import modules
-from regular_expression import RegexGuardrail
+from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
 
@@ -74,7 +80,9 @@ def main():
         return
     
     attack_type = "Unknown"
-    if "ShadowCode" in args.input_path:
+    if "merged_all" in args.input_path:
+        attack_type = "Merged_All"
+    elif "ShadowCode" in args.input_path:
         attack_type = "ShadowCode"
     elif "XOXO_attack" in args.input_path:
         attack_type = "XOXO"
@@ -89,17 +97,25 @@ def main():
 
     # --- Instantiate Guardrails ---
     # Stage I: Lightweight Syntactic Filtering
-    regex_guard = RegexGuardrail()
+    pre_filter = PreFilter(TS_PARSER, C_LANGUAGE)
     # Stage II: Adversarial (Original L1/L2 Merged)
     adversarial_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args)
     # Stage III: Semantic (Original L3)
     semantic_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args)
-    
+
     stats = {
+        # 基礎統計 (解決 KeyError)
         "TP": 0, "TN": 0, "FP": 0, "FN": 0, 
         "Total_Adv": 0, "Total_Benign": 0,
+        
+        # 各層獨立攔截數 (獨自觸發)
+        "TP_Regex": 0, "TP_Adversarial": 0, "TP_Semantic": 0,
         "FP_Regex": 0, "FP_Adversarial": 0, "FP_Semantic": 0,
-        "TP_Regex": 0, "TP_Adversarial": 0, "TP_Semantic": 0
+        
+        # 遞增式攔截數 (Cumulative)
+        "L1_TP": 0, "L1_FP": 0,
+        "L12_TP": 0, "L12_FP": 0,
+        "L123_TP": 0, "L123_FP": 0
     }
     
     fp_samples = []
@@ -122,7 +138,7 @@ def main():
                 code_to_check = code_snippet if code_snippet else ""
                 
                 # 1. Stage I: Regex Guardrail
-                reg_detected, stage1_code, reg_debug = regex_guard.detect(code_to_check)
+                reg_detected, stage1_code, reg_debug = pre_filter.detect(code_to_check)
                 
                 # 2. Stage II: Adversarial Guardrail
                 adv_detected, stage2_code, adv_debug = adversarial_guard.detect(stage1_code)
@@ -145,12 +161,20 @@ def main():
             benign_code = entry.get("code") or ""
             res = run_defense_pipeline(benign_code)
             
+            # 1. 遞增式紀錄 (Cumulative)
+            if res["Regex"]: 
+                stats["L1_FP"] += 1
+            if res["Regex"] or res["Adversarial"]: 
+                stats["L12_FP"] += 1
+            if res["Regex"] or res["Adversarial"] or res["Semantic"]: 
+                stats["L123_FP"] += 1
+                
+            # 2. 獨立紀錄與輸出 Log (修正重複計數)
             is_detected = res["Regex"] or res["Adversarial"] or res["Semantic"]
-            
             if is_detected: 
                 stats["FP"] += 1
                 if res["Regex"]: 
-                    stats["FP_Regex"] += 1
+                    stats["FP_Regex"] += 1 # 僅在此處計數即可
                     for detail in res["reg_debug"]:
                         print(f"  [FP-Regex] 類型: {detail['type']}, 內容: {detail['matched_text']}")
                 if res["Adversarial"]: 
@@ -158,7 +182,8 @@ def main():
                     for detail in res["adv_debug"]:
                         print(f"  [FP-Adv] 類型: {detail['type']}, 分數: {detail['score']:.2f}, 白名單: {detail['whitelisted']}")
                         print(f"    刪除內容: {detail['text_snippet']}")
-                if res["Semantic"]: stats["FP_Semantic"] += 1
+                if res["Semantic"]: 
+                    stats["FP_Semantic"] += 1
                 
                 triggered_sem = [d for d in res["sem_debug"] if d['triggered']]
                 if len(fp_samples) < 5 and triggered_sem:
@@ -177,8 +202,16 @@ def main():
             adv_code = entry.get("adv_code") or ""
             adv_res = run_defense_pipeline(adv_code)
             
+            # 1. 遞增式紀錄 (Cumulative)
+            if adv_res["Regex"]: 
+                stats["L1_TP"] += 1
+            if adv_res["Regex"] or adv_res["Adversarial"]: 
+                stats["L12_TP"] += 1
+            if adv_res["Regex"] or adv_res["Adversarial"] or adv_res["Semantic"]: 
+                stats["L123_TP"] += 1
+
+            # 2. 獨立紀錄
             is_detected_adv = adv_res["Regex"] or adv_res["Adversarial"] or adv_res["Semantic"]
-            
             if is_detected_adv: 
                 stats["TP"] += 1
                 if adv_res["Regex"]: stats["TP_Regex"] += 1
@@ -205,31 +238,34 @@ def main():
             out_f.write(json.dumps(entry) + "\n")
 
     # --- Metrics Calculation ---
-    tp = stats["TP"]
-    tn = stats["TN"]
-    fp = stats["FP"]
-    fn = stats["FN"]
+    tp_final = stats["L123_TP"]
+    fp_final = stats["L123_FP"]
+    tn_final = stats["Total_Benign"] - fp_final
+    fn_final = stats["Total_Adv"] - tp_final
 
-    precision = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
-    recall = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    precision = (tp_final / (tp_final + fp_final)) if (tp_final + fp_final) > 0 else 0.0
+    recall = (tp_final / (tp_final + fn_final)) if (tp_final + fn_final) > 0 else 0.0
     f1_score = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-    fpr = (fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+    fpr = (fp_final / (fp_final + tn_final)) if (fp_final + tn_final) > 0 else 0.0
 
-    print("My Defense framework Result")
+    print("\n" + "="*40)
+    print("My Defense Framework Result (Overall L1+L2+L3)")
+    print("="*40)
     print(f"Precision:    {precision * 100:.2f}%")
     print(f"Recall:       {recall * 100:.2f}%")
     print(f"F1-Score:     {f1_score:.2f}")
     print(f"FPR:          {fpr * 100:.2f}%")
 
-    print(f"False Positives Breakdown:")
-    print(f"  Regex Guardrail:       {stats['FP_Regex']}")
-    print(f"  Adversarial Guardrail: {stats['FP_Adversarial']}")
-    print(f"  Semantic Guardrail:    {stats['FP_Semantic']}")
-    print("-" * 30)
-    print(f"True Positives Breakdown:")
-    print(f"  Regex Guardrail:       {stats['TP_Regex']}")
-    print(f"  Adversarial Guardrail: {stats['TP_Adversarial']}")
-    print(f"  Semantic Guardrail:    {stats['TP_Semantic']}")
+    print("\n[遞增式防禦成效")
+    print(f"  [第一層 (Regex)]           TP (攔截惡意): {stats['L1_TP']:<5} | FP (誤判正常): {stats['L1_FP']}")
+    print(f"  [第一+二層 (Regex+Adv)]    TP (攔截惡意): {stats['L12_TP']:<5} | FP (誤判正常): {stats['L12_FP']}")
+    print(f"  [第一+二+三層 (綜合)]      TP (攔截惡意): {stats['L123_TP']:<5} | FP (誤判正常): {stats['L123_FP']}")
+
+    print("\n[各層獨立觸發次數")
+    print(f"  Stage I   (Regex):       TP: {stats['TP_Regex']}, FP: {stats['FP_Regex']}")
+    print(f"  Stage II  (Adversarial): TP: {stats['TP_Adversarial']}, FP: {stats['FP_Adversarial']}")
+    print(f"  Stage III (Semantic):    TP: {stats['TP_Semantic']}, FP: {stats['FP_Semantic']}")
+    print("="*40)
     
     eval_dir = "result/evaluation"
     eval_file = os.path.join(eval_dir, f"f1_score_{attack_type}.json")
@@ -250,6 +286,24 @@ def main():
             "recall": round(recall, 4),
             "f1_score": round(f1_score, 4),
             "fpr": round(fpr, 4)
+        },
+        "layer_statistics": {
+            "cumulative": {
+                "L1_TP": stats["L1_TP"],
+                "L1_FP": stats["L1_FP"],
+                "L12_TP": stats["L12_TP"],
+                "L12_FP": stats["L12_FP"],
+                "L123_TP": stats["L123_TP"],
+                "L123_FP": stats["L123_FP"]
+            },
+            "independent": {
+                "TP_Regex": stats["TP_Regex"],
+                "FP_Regex": stats["FP_Regex"],
+                "TP_Adversarial": stats["TP_Adversarial"],
+                "FP_Adversarial": stats["FP_Adversarial"],
+                "TP_Semantic": stats["TP_Semantic"],
+                "FP_Semantic": stats["FP_Semantic"]
+            }
         }
     }
 
