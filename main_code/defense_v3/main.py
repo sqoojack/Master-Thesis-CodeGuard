@@ -17,11 +17,12 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
     -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
     
 Merged:
-CUDA_VISIBLE_DEVICES=1 python main_code/defense_v3/main.py \
+CUDA_VISIBLE_DEVICES=0 python main_code/defense_v3/main.py \
     -A 12.8 \
-    -L3_b 0.025 \
+    --th_string 15.0 \
+    -L3_b 0.030 \
     -L3_t 0.10 \
-    -i Dataset/merged_all/merged_dataset.jsonl \
+    -i Dataset/merged_all/tiny_merged_dataset.jsonl \
     -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
 """ 
 
@@ -33,11 +34,23 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tree_sitter import Language, Parser
 from datetime import datetime
+import numpy as np
 
 # Import modules
 from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
+
+class NumpyEncoder(json.JSONEncoder):
+    """將 numpy 資料型別轉換為 Python 原生型別以利 JSON 序列化"""
+    def default(self, obj):
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
 
 # --- Tree-sitter Setup ---
 def setup_tree_sitter():
@@ -61,7 +74,7 @@ def main():
     # Adversarial Guardrail Params (Simplified)
     parser.add_argument("-A", "--adversarial_threshold", type=float, default=10.0, 
                         help="Threshold for deleting adversarial comments.")
-    parser.add_argument("--th_string_hard", type=float, default=100.0,
+    parser.add_argument("--th_string", type=float, default=15.0,
                         help="Threshold specifically for string literals.")
     
     # Semantic Guardrail Params (L3)
@@ -128,6 +141,14 @@ def main():
         lines = [line.strip() for line in f if line.strip()]
 
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+    
+    os.makedirs("result/debug_logs", exist_ok=True)
+    
+    fn_log_path = "result/debug_logs/false_negatives_log.jsonl"
+    fn_file = open(fn_log_path, 'w', encoding='utf-8')
+    
+    fp_log_path = "result/debug_logs/false_positives_log.jsonl"
+    fp_file = open(fp_log_path, 'w', encoding='utf-8')
 
     with open(args.output_path, 'w', encoding='utf-8') as out_f:
         for line in tqdm(lines, ncols=100, desc="Defending"):
@@ -173,27 +194,21 @@ def main():
             is_detected = res["Regex"] or res["Adversarial"] or res["Semantic"]
             if is_detected: 
                 stats["FP"] += 1
-                if res["Regex"]: 
-                    stats["FP_Regex"] += 1 # 僅在此處計數即可
-                    for detail in res["reg_debug"]:
-                        print(f"  [FP-Regex] 類型: {detail['type']}, 內容: {detail['matched_text']}")
-                if res["Adversarial"]: 
-                    stats["FP_Adversarial"] += 1
-                    for detail in res["adv_debug"]:
-                        print(f"  [FP-Adv] 類型: {detail['type']}, 分數: {detail['score']:.2f}, 白名單: {detail['whitelisted']}")
-                        print(f"    刪除內容: {detail['text_snippet']}")
-                if res["Semantic"]: 
-                    stats["FP_Semantic"] += 1
+                if res["Regex"]: stats["FP_Regex"] += 1
+                if res["Adversarial"]: stats["FP_Adversarial"] += 1
+                if res["Semantic"]: stats["FP_Semantic"] += 1
                 
-                triggered_sem = [d for d in res["sem_debug"] if d['triggered']]
-                if len(fp_samples) < 5 and triggered_sem:
-                    fp_samples.append({
-                        "id": stats["Total_Benign"],
-                        "code": benign_code[:100],
+                # 將誤判(FP)樣本完整寫入 JSONL，不再 print 到終端機
+                fp_entry = {
+                    "id": stats["Total_Benign"],
+                    "code": benign_code,
+                    "layer_debug": {
                         "reg_debug": res["reg_debug"],
                         "adv_debug": res["adv_debug"],
-                        "sem_debug": triggered_sem
-                    })
+                        "sem_debug": res["sem_debug"]
+                    }
+                }
+                fp_file.write(json.dumps(fp_entry, cls=NumpyEncoder) + "\n")
             else: 
                 stats["TN"] += 1
 
@@ -219,14 +234,16 @@ def main():
                 if adv_res["Semantic"]: stats["TP_Semantic"] += 1
             else: 
                 stats["FN"] += 1
-                if len(fn_samples) < 5:
-                    fn_samples.append({
-                        "id": stats["Total_Adv"],
-                        "code": adv_code[:100],
+                fn_entry = {
+                    "id": stats["Total_Adv"],
+                    "code": adv_code, # 不做 [:100] 截斷，保留完整惡意程式碼
+                    "layer_debug": {
                         "reg_debug": adv_res["reg_debug"],
                         "adv_debug": adv_res["adv_debug"],
                         "sem_debug": adv_res["sem_debug"]
-                    })
+                    }
+                }
+                fn_file.write(json.dumps(fn_entry, cls=NumpyEncoder) + "\n")
             
             entry["repaired_code"] = adv_res["final_code"]
             entry["defense_detected"] = is_detected_adv
@@ -235,7 +252,10 @@ def main():
                 "Adversarial": adv_res["Adversarial"],
                 "Semantic": adv_res["Semantic"]
             }
-            out_f.write(json.dumps(entry) + "\n")
+            out_f.write(json.dumps(entry, cls=NumpyEncoder) + "\n")
+            
+    fn_file.close()
+    fp_file.close()
 
     # --- Metrics Calculation ---
     tp_final = stats["L123_TP"]
@@ -277,7 +297,7 @@ def main():
         "attack_type": attack_type,
         "parameters": {
             "adversarial_threshold": args.adversarial_threshold,
-            "th_string_hard": args.th_string_hard,
+            "th_string": args.th_string,
             "l3_base_influence": args.l3_base_influence,
             "l3_surprise_tolerance": args.l3_surprise_tolerance
         },

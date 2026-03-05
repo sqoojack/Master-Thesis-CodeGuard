@@ -10,7 +10,7 @@ class AdversarialGuardrail:
         self.language = language
         
         self.adversarial_threshold = args.adversarial_threshold
-        self.th_string_hard = args.th_string_hard
+        self.th_string = args.th_string
 
         # 擴充白名單：加入常見的 C/C++ 註解前綴與標記
         self.docstring_keywords = [
@@ -61,7 +61,7 @@ class AdversarialGuardrail:
         except:
             return False, code, []
 
-        query = self.language.query("(comment) @comment (string_literal) @string")
+        query = self.language.query("(comment) @comment (string_literal) @string (identifier) @identifier")
         captures = query.captures(tree.root_node)
         
         replacements = [] 
@@ -71,34 +71,45 @@ class AdversarialGuardrail:
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
             
-            # 【關鍵修改】長度過濾：一般的惡意提示注入都會超過 35 個字元。
-            # 大幅減少對短註解 (如 /* residual */, // Back Chain) 的誤判
-            if type_name == 'comment' and len(text) < 35: 
+            # 1. 極端過濾：Token 數量太少（小於 4 個）的註解無法構成 Prompt Injection，直接忽略
+            if len(text) < 10: 
                 continue 
-            if type_name == 'string' and len(text) < 15:
-                continue
 
             score = self.calc_mink_score(text, k=0.5)
+            
+            # 2. 基礎門檻
             current_threshold = self.adversarial_threshold
             whitelisted = self.is_whitelisted(text)
             
+            # 3. 動態長度懲罰 (Length Penalty)
+            # 若字元長度小於 40，則依比例提高門檻，越短門檻越高 (最多增加 5.0 分)
+            if type_name == 'comment' and len(text) < 40:
+                length_penalty = 5.0 * (1.0 - (len(text) / 40.0))
+                current_threshold += length_penalty
+            
+            # 4. 白名單加權
             if type_name == 'comment' and whitelisted:
-                current_threshold *= 2.0 # 白名單加權
+                current_threshold *= 1.5 
             
             # 判定是否觸發
             is_this_triggered = False
             if type_name == 'comment' and score > current_threshold:
                 is_this_triggered = True
                 replacements.append((node.start_byte, node.end_byte, "")) 
-            elif type_name == 'string' and score > self.th_string_hard:
+            elif type_name == 'string' and score > self.th_string:
                 is_this_triggered = True
                 replacements.append((node.start_byte, node.end_byte, '""')) 
+            elif type_name == 'identifier' and score > current_threshold:
+                is_this_triggered = True
+                # 變數若包含惡意提示，替換為中性的 VAR_ADV 以維持語法結構
+                replacements.append((node.start_byte, node.end_byte, "VAR_ADV")) 
 
             if is_this_triggered:
                 triggered = True
                 adv_debug.append({
                     "type": type_name,
                     "score": score,
+                    "threshold_applied": current_threshold, # 紀錄實際套用的門檻以供分析
                     "whitelisted": whitelisted,
                     "text_snippet": text[:50].replace('\n', ' ')
                 })

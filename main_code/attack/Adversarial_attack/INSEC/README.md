@@ -1,0 +1,50 @@
+# Black-Box Adversarial Attacks on LLM-Based Code Completion
+[![arXiv](https://img.shields.io/badge/arXiv-2408.02509-b31b1b.svg)](https://arxiv.org/abs/2408.02509)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-dataset-FF9D00?logo=huggingface&logoColor=white)](https://huggingface.co/datasets/eth-sri/insec-vulnerability/)
+
+This is the reproduction package for our INSEC attack (**IN**jecting **S**ecurity-**E**vading **C**omments), presented in the paper "Black-Box Adversarial Attacks on LLM-Based Code Completion" by Jenko, Mündler, et. al., *ICML 2025*.
+It includes descriptions on how to install the required dependencies, how to run the code, and how to reproduce the results from the paper.
+
+## Installation
+
+We provide extensive installation instructions in the [INSTALL.md](INSTALL.md) file.
+
+## Running the code
+
+Below is an example of how to get the attack strings on [StarCoder 3B](https://huggingface.co/bigcode/starcoderbase-3b).
+
+```
+cd scripts
+python3 generic_launch.py --config fig3_main/main_scb3/config.json --save_dir ../results/example
+```
+
+The naming convention is `<save-dir>/<listparam>/<timestamp>/<elem>`, where 
+- `save_dir` is the save-dir parameter passed to `generic_launch.py`
+- `listparam` is the exactly one parameter that is stored as a list 
+- `timestamp` is the timestamp parameter in the config file
+- `elem` is one of the elements of `listparam`:
+
+In this case, the results are stored in `data/example/model_dir/final/starcoderbase-3b/starcoderbase-3b/`.
+
+### Reproducing Figures
+
+We provide the configurations used to generate data for each figure in `scripts/fig*`. They can be run as described above.
+
+## Dataset
+
+> Note: You can find the vulnerability dataset on [Hugging Face](https://huggingface.co/datasets/eth-sri/insec-vulnerability/)
+
+You can find the training, validation and test sets for the vulnerability dataset in the folders [`data_train_val`](data_train_val) and [`data_test`](data_test) respectively. Each directory contains subdirectories for the respective CWEs. The CWE directories contain JSONL lists of objects (`train.jsonl`, `val.jsonl`, and `test.jsonl`)  with the following attributes:
+
+- `pre_tt`: Text preceding the line of the vulnerability
+- `post_tt`: Text preceding the vulnerable tokens in the line of the vulnerability
+- `suffix_pre`: Text following the vulnerable tokens in the line of the vulnerability
+- `suffix_post`: Remainder of the file after the line of the vulnerability
+- `lang`: Language of the vulnerable code snippet (e.g., `py` or `cpp`)
+- `key`: Key character sequences that were used to substitute CodeQL queries during training. Only in the train split.
+- `info`: A metadata object, containing the CodeQL query to check the snippet for vulnerabilities and the source of the code snippet.
+
+
+In particular, the prefix for model infilling is `pre_tt + post_tt`, whereas the suffix is `suffix_pre + suffix_post`.
+
+For the functionality datasets, please find the corresponding data in the subfolders of [`multipl-e`](multipl-e), including the functionality dataset for the main evaluation based on Multipl-E, [`multiple_fim`](multipl-e/multiple_fim), our confirmation dataset based on HumanEval-X, [`humaneval-x_fim`](multipl-e/humaneval-x_fim), and our repository-level completion dataset based on RepoBench, [`repobench_fim`](multipl-e/repobench_fim).

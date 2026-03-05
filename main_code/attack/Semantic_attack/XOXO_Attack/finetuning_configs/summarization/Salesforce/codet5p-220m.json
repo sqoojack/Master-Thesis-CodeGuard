@@ -1,0 +1,16 @@
+[
+    "python",
+    "run_codet5p.py",
+    "--load",
+    "Salesforce/codet5p-220m",
+    "--max-source-len",
+    "320",
+    "--max-target-len",
+    "128",
+    "--batch-size",
+    "20",
+    "--epochs",
+    "10",
+    "--lr",
+    "2e-5"
+]
