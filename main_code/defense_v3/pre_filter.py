@@ -1,16 +1,11 @@
 import re
-import math
-from collections import Counter
 
 class PreFilter:
     def __init__(self, parser, language):
         self.parser = parser
         self.language = language
         
-        # 1. 宣告危險函數白名單 (僅針對 Function Call 節點)
-        self.dangerous_functions = {b"system", b"exec", b"popen", b"eval"}
-        
-        # 2. 字串內部的惡意特徵 (原本的 Regex 轉移至此，僅對 String Literal 節點進行匹配)
+        # 1. 惡意特徵正則匹配 (專注於 Prompt Injection, XSS, 系統/路徑注入)
         self.string_patterns = {
             "SQL_Injection": re.compile(
                 r"(?i)\b(UNION\s+SELECT|DROP\s+TABLE|INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+.+?\s+SET)\b|--\s*$|\bOR\s+1\s*=\s*1\b"
@@ -20,29 +15,44 @@ class PreFilter:
             ),
             "Path_Traversal": re.compile(
                 r"(?i)(\.\./\.\./|\betc/passwd\b|\betc/shadow\b|%2e%2e%2f)"
+            ),
+            "Prompt_Template_Injection": re.compile(
+                r"(?i)(\{\{.*?\}\}|\(\)\s*=>|<script>|javascript:|\[\'\$[A-Za-z]+)"
             )
         }
         
-        # 建立 AST 查詢語法 (適用於 C/C++ 等)
-        self.call_query = self.language.query("(call_expression function: (identifier) @func_name)")
+        # 2. 節點查詢：必須包含 ERROR 節點，以捕捉破壞語法的注入攻擊
         self.string_query = self.language.query("(string_literal) @string")
+        self.comment_query = self.language.query("(comment) @comment")
+        self.identifier_query = self.language.query("(identifier) @identifier")
+        self.error_query = self.language.query("(ERROR) @error")
 
-    def _calculate_entropy(self, text):
-        """計算字串的資訊熵 (Shannon Entropy)"""
-        if not text: return 0.0
-        counts = Counter(text)
-        length = len(text)
-        return -sum((count / length) * math.log2(count / length) for count in counts.values())
-
-    def _check_obfuscation(self, text):
-        """檢查是否包含過高比例的 Hex/Unicode 編碼跳脫字元"""
-        hex_unicode_matches = re.findall(r'\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}', text)
-        if not hex_unicode_matches:
-            return False
+    def _check_structural_anomaly(self, text, node_type):
+        """檢查文本的結構異常，取代資訊熵以消除自然語言誤判"""
+        if len(text) < 15:
+            return False, None
+            
+        # 1. 檢查超長連續字元 (無空白)，攔截 Base64 / Hex payload
+        max_word_len = max((len(w) for w in text.split()), default=0)
+        if max_word_len > 80:
+            return True, f"Long_Continuous_String ({max_word_len})"
+            
+        # 2. 檢查特殊符號密度 (攔截指令注入與模板注入)
+        # 排除常規標點符號 (.,:;-_)，專注於程式邏輯符號
+        special_chars = set("{}[]()=><$|\\\"'`~^")
+        special_count = sum(1 for c in text if c in special_chars)
+        special_ratio = special_count / len(text)
         
-        # 若編碼字元長度佔比超過 25%，判定為混淆
-        obfuscated_ratio = (len(hex_unicode_matches) * 4) / len(text) if len(text) > 0 else 0
-        return obfuscated_ratio > 0.25
+        threshold = 0.3 if node_type == 'string_literal' else 0.2
+        if special_ratio > threshold:
+            return True, f"High_Special_Char_Ratio ({special_ratio:.2f})"
+            
+        # 3. 檢查異常字元區塊 (攔截韓文、盲文等非預期字元夾帶)
+        non_ascii_count = sum(1 for c in text if ord(c) > 127)
+        if non_ascii_count > 5 and (non_ascii_count / len(text)) > 0.15:
+            return True, "Abnormal_Non_ASCII_Ratio"
+            
+        return False, None
 
     def detect(self, code):
         """
@@ -61,65 +71,50 @@ class PreFilter:
         triggered = False
         debug_info = []
         
-        # A. 檢測危險函數調用
-        for node, _ in self.call_query.captures(tree.root_node):
-            func_name = node.text
-            if func_name in self.dangerous_functions:
-                triggered = True
-                debug_info.append({
-                    "layer": "Stage_I_PreFilter",
-                    "type": "Dangerous_Function",
-                    "matched_text": func_name.decode("utf8", errors="ignore"),
-                    "span": (node.start_byte, node.end_byte)
-                })
+        nodes_to_scan = []
+        for query in [self.string_query, self.comment_query, self.identifier_query, self.error_query]:
+            for node, _ in query.captures(tree.root_node):
+                nodes_to_scan.append(node)
 
-        # B. 檢測字串內容 (混淆、高熵、內部惡意語法)
-        for node, _ in self.string_query.captures(tree.root_node):
-            string_text = node.text.decode("utf8", errors="ignore")
+        for node in nodes_to_scan:
+            text = node.text.decode("utf8", errors="ignore")
+            node_type = node.type
             
-            # B-1. 檢查編碼混淆
-            if self._check_obfuscation(string_text):
+            # A. 正則特徵掃描 (優先執行)
+            matched_regex = False
+            for attack_type, pattern in self.string_patterns.items():
+                if pattern.search(text):
+                    triggered = True
+                    matched_regex = True
+                    debug_info.append({
+                        "layer": "Stage_I_AST",
+                        "type": f"Regex_Match_{attack_type}",
+                        "matched_text": text[:50].replace('\n', ' '),
+                        "span": (node.start_byte, node.end_byte)
+                    })
+                    break
+            
+            if matched_regex:
+                continue
+
+            # B. 結構異常檢測 (若未觸發正則，檢查符號與亂碼分佈)
+            is_anomalous, anomaly_type = self._check_structural_anomaly(text, node_type)
+            if is_anomalous:
                 triggered = True
                 debug_info.append({
                     "layer": "Stage_I_AST",
-                    "type": "Obfuscation",
-                    "matched_text": string_text[:50].replace('\n', ' '),
+                    "type": f"Anomaly_{anomaly_type}_{node_type}",
+                    "matched_text": text[:50].replace('\n', ' '),
                     "span": (node.start_byte, node.end_byte)
                 })
-                continue # 已確認為惡意，跳過該節點後續檢查
 
-            # B-2. 檢查高資訊熵 (長度大於 20 的字串，熵值 > 4.5 視為異常 Shellcode)
-            if len(string_text) > 20:
-                entropy = self._calculate_entropy(string_text)
-                if entropy > 4.5:
-                    triggered = True
-                    debug_info.append({
-                        "layer": "Stage_I_AST",
-                        "type": f"High_Entropy_String ({entropy:.2f})",
-                        "matched_text": string_text[:50].replace('\n', ' '),
-                        "span": (node.start_byte, node.end_byte)
-                    })
-                    continue
-
-            # B-3. 字串內部的注入攻擊 (Semgrep 邏輯：不掃描一般註解與程式碼)
-            for attack_type, pattern in self.string_patterns.items():
-                if pattern.search(string_text):
-                    triggered = True
-                    debug_info.append({
-                        "layer": "Stage_I_AST",
-                        "type": f"String_Injection_{attack_type}",
-                        "matched_text": string_text[:50].replace('\n', ' '),
-                        "span": (node.start_byte, node.end_byte)
-                    })
-
-        # C. 執行 Fail-fast 修復：從後往前替換，避免位移錯誤
+        # 執行 Fail-fast 修復：從後往前替換，避免位移錯誤
         repaired_code = code
         if triggered:
-            replacements = sorted(debug_info, key=lambda x: x["span"][0], reverse=True)
-            new_code_bytes = list(code_bytes)
-            for detail in replacements:
-                start, end = detail["span"]
-                new_code_bytes[start:end] = bytes("[FILTERED_BY_STAGE_1]", "utf8")
-            repaired_code = bytes(new_code_bytes).decode("utf8", errors="ignore")
+            replacements = sorted({(d["span"][0], d["span"][1]) for d in debug_info}, key=lambda x: x[0], reverse=True)
+            new_code_bytes = bytearray(code_bytes)
+            for start, end in replacements:
+                new_code_bytes[start:end] = b"[FILTERED_BY_STAGE_1]"
+            repaired_code = new_code_bytes.decode("utf8", errors="ignore")
 
         return triggered, repaired_code, debug_info

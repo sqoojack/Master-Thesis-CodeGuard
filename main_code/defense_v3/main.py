@@ -139,6 +139,21 @@ def main():
     
     with open(args.input_path, 'r', encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
+    
+    # 在迴圈開始前初始化紀錄列表
+    raw_scores_list = []
+
+    # 定義提取預測分數的函數
+    def get_pred_score(layer_results):
+        if layer_results["Regex"]:
+            return 100.0
+        elif layer_results["Adversarial"]:
+            return 50.0
+        else:
+            # 若進入 Semantic，從 sem_debug 中取出最大的 influence 值
+            if layer_results["sem_debug"]:
+                return max([d.get("influence", 0.0) for d in layer_results["sem_debug"]], default=0.0)
+            return 0.0
 
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     
@@ -182,6 +197,8 @@ def main():
             benign_code = entry.get("code") or ""
             res = run_defense_pipeline(benign_code)
             
+            raw_scores_list.append({"label": 0, "score": get_pred_score(res)})
+            
             # 1. 遞增式紀錄 (Cumulative)
             if res["Regex"]: 
                 stats["L1_FP"] += 1
@@ -216,6 +233,8 @@ def main():
             stats["Total_Adv"] += 1
             adv_code = entry.get("adv_code") or ""
             adv_res = run_defense_pipeline(adv_code)
+            
+            raw_scores_list.append({"label": 1, "score": get_pred_score(adv_res)})
             
             # 1. 遞增式紀錄 (Cumulative)
             if adv_res["Regex"]: 
@@ -256,6 +275,13 @@ def main():
             
     fn_file.close()
     fp_file.close()
+    
+    eval_dir = "result/evaluation"
+    os.makedirs(eval_dir, exist_ok=True)
+    
+    raw_scores_path = os.path.join(eval_dir, f"raw_scores_{attack_type}.json")
+    with open(raw_scores_path, 'w', encoding='utf-8') as f:
+        json.dump(raw_scores_list, f, indent=4, cls=NumpyEncoder)
 
     # --- Metrics Calculation ---
     tp_final = stats["L123_TP"]
@@ -287,9 +313,9 @@ def main():
     print(f"  Stage III (Semantic):    TP: {stats['TP_Semantic']}, FP: {stats['FP_Semantic']}")
     print("="*40)
     
-    eval_dir = "result/evaluation"
+    
     eval_file = os.path.join(eval_dir, f"f1_score_{attack_type}.json")
-    os.makedirs(eval_dir, exist_ok=True)
+    
 
     current_run_data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
