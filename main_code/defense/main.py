@@ -17,13 +17,50 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
     -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
     
 Merged:
-CUDA_VISIBLE_DEVICES=0 python main_code/defense_v3/main.py \
+CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     -A 12.8 \
     --th_string 15.0 \
     -L3_b 0.030 \
     -L3_t 0.10 \
     -i Dataset/merged_all/tiny_merged_dataset.jsonl \
     -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
+    
+Merged_dynamic_threshold:
+CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+    -A 13.0 \
+    --th_string 11.0 \
+    -L3_b 0.032 \
+    -L3_t 0.10 \
+    -i Dataset/merged_all/tiny_merged_dataset.jsonl \
+    -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
+
+Adaptive attack:
+    decoys:
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+        -A 13.0 \
+        --th_string 9.0 \
+        -L3_b 0.034 \
+        -L3_t 0.10 \
+        -i Dataset/Adaptive_attack/decoys_attack.jsonl \
+        -o result/sanitized_data/merged_all/CodeGuard_sanitized_decoy.jsonl
+        
+    copy_trigger:
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+        -A 13.0 \
+        --th_string 11.0 \
+        -L3_b 0.03 \
+        -L3_t 0.10 \
+        -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl \
+        -o result/sanitized_data/merged_all/CodeGuard_sanitized_copy_trigger.jsonl
+        
+    contextual:
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+        -A 13.0 \
+        --th_string 11.0 \
+        -L3_b 0.034 \
+        -L3_t 0.10 \
+        -i Dataset/Adaptive_attack/contextual_attack.jsonl \
+        -o result/sanitized_data/merged_all/CodeGuard_sanitized_contextual.jsonl
 """ 
 
 import os
@@ -99,7 +136,14 @@ def main():
         attack_type = "ShadowCode"
     elif "XOXO_attack" in args.input_path:
         attack_type = "XOXO"
-
+    elif "Adaptive_attack" in args.input_path:
+        if "decoys" in args.input_path:
+            attack_type = "Adaptive_decoy"
+        elif "copy" in args.input_path:
+            attack_type = "Adaptive_copy"
+        elif "contextual" in args.input_path:
+            attack_type = "Adaptive_contextual"
+        
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[-] Loading Guard Model: {args.model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
