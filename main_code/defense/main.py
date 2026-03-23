@@ -36,16 +36,16 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
 
 Adaptive attack:
     decoys:
-    CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
         -A 13.0 \
-        --th_string 9.0 \
+        --th_string 11.0 \
         -L3_b 0.034 \
         -L3_t 0.10 \
         -i Dataset/Adaptive_attack/decoys_attack.jsonl \
         -o result/sanitized_data/merged_all/CodeGuard_sanitized_decoy.jsonl
         
     copy_trigger:
-    CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
         -A 13.0 \
         --th_string 11.0 \
         -L3_b 0.03 \
@@ -54,9 +54,9 @@ Adaptive attack:
         -o result/sanitized_data/merged_all/CodeGuard_sanitized_copy_trigger.jsonl
         
     contextual:
-    CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
         -A 13.0 \
-        --th_string 11.0 \
+        --th_string 9.0 \
         -L3_b 0.034 \
         -L3_t 0.10 \
         -i Dataset/Adaptive_attack/contextual_attack.jsonl \

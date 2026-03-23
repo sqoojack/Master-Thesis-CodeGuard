@@ -161,7 +161,7 @@ class SemanticGuardrail:
             return False, code, []
 
         candidates.sort(key=lambda x: x['surprise_score'], reverse=True)
-        top_candidates = candidates[:5]
+        top_candidates = candidates[:20]
         
         toxic_nodes = [] # 修正：這裡要與下方一致
         is_attack = False
