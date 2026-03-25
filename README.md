@@ -58,7 +58,7 @@ python main.py
 ```
 python main_code/evaluate/Inference_shadowcode.py
 ```
-評估 XOXO 攻擊效果：
+評估 XOXO 攻擊效果:
 
 ```
 python main_code/evaluate/Inference_XOXO.py
