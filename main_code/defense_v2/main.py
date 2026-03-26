@@ -27,10 +27,10 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
     
 Merged_dynamic_threshold:
-CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/main.py \
     -A 13.0 \
-    --th_string 11.0 \
-    -L3_b 0.032 \
+    --th_string 9.0 \
+    -L3_b 0.034 \
     -L3_t 0.10 \
     -i Dataset/merged_all/tiny_merged_dataset.jsonl \
     -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
@@ -195,9 +195,9 @@ def main():
         elif layer_results["Adversarial"]:
             return 50.0
         else:
-            # 若進入 Semantic，從 sem_debug 中取出最大的 influence 值
+            # 若進入 Semantic，從 sem_debug 中取出最大的 joint_influence 值
             if layer_results["sem_debug"]:
-                return max([d.get("influence", 0.0) for d in layer_results["sem_debug"]], default=0.0)
+                return max([d.get("joint_influence", 0.0) for d in layer_results["sem_debug"]], default=0.0)
             return 0.0
 
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)

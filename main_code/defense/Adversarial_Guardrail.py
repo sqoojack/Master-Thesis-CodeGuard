@@ -26,7 +26,7 @@ class AdversarialGuardrail:
             shift_labels = input_ids[..., 1:].contiguous()
             loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            return losses.cpu().numpy()
+            return losses.detach().cpu().to(torch.float32).numpy()
 
     def calc_mink_score(self, text, k=0.5): # 這裡將 k 從 0.2 放寬到 0.5，平滑極端值
         if not text or len(text) < 10: 

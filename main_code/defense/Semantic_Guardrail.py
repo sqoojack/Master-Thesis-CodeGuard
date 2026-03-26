@@ -38,7 +38,7 @@ class SemanticGuardrail:
             shift_labels = input_ids[..., 1:].contiguous()
             loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            return losses.cpu().numpy()
+            return losses.detach().cpu().to(torch.float32).numpy()
 
     def get_prior_loss(self, var_text):
         inputs = self.tokenizer(var_text, return_tensors="pt").to(self.device)
