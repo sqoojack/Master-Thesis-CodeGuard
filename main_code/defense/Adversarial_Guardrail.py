@@ -28,7 +28,7 @@ class AdversarialGuardrail:
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.detach().cpu().to(torch.float32).numpy()
 
-    def calc_mink_score(self, text, k=0.5): # 這裡將 k 從 0.2 放寬到 0.5，平滑極端值
+    def calc_mink_score(self, text, k=0.5): 
         if not text or len(text) < 10: 
             return 0.0
             
@@ -52,7 +52,6 @@ class AdversarialGuardrail:
         return any(kw.lower() in text.lower() for kw in self.docstring_keywords) or text.count('>>>') >= 1
 
     def detect(self, code):
-        """執行 Adversarial 檢測，並回傳詳細偵測資訊"""
         if not code or not self.language: return False, code, []
         
         code_bytes = bytes(code, "utf8")

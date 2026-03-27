@@ -1,6 +1,7 @@
 import torch
-import numpy as np
 import torch.nn.functional as F
+import numpy as np
+import re
 from collections import defaultdict
 
 class SemanticGuardrail:
@@ -11,6 +12,7 @@ class SemanticGuardrail:
         self.parser = parser
         self.language = language
         
+        # 參數
         self.base_influence_th = args.l3_base_influence
         self.surprise_tolerance = args.l3_surprise_tolerance
         
@@ -31,6 +33,7 @@ class SemanticGuardrail:
                                 '_ops', '_cb', '_ctx', '_t', '_s', '_eq', '_ne', '_impl', '_handler')
 
     def get_token_losses(self, input_ids):
+        """僅計算 Loss (用於快速掃描)"""
         with torch.no_grad():
             outputs = self.model(input_ids, labels=input_ids)
             shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -39,14 +42,90 @@ class SemanticGuardrail:
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.detach().cpu().to(torch.float32).numpy()
 
-    def get_prior_loss(self, node_text):
-        inputs = self.tokenizer(node_text, return_tensors="pt").to(self.device)
+    def get_losses_and_hidden_states(self, input_ids):
+        """計算 Loss 並同時回傳隱藏層特徵 (用於深度驗證)"""
+        with torch.no_grad():
+            outputs = self.model(input_ids, labels=input_ids, output_hidden_states=True)
+            shift_logits = outputs.logits[..., :-1, :].contiguous()
+            shift_labels = input_ids[..., 1:].contiguous()
+            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+            losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            return losses.detach().cpu().to(torch.float32).numpy(), outputs.hidden_states
+
+    def get_prior_loss(self, var_text):
+        inputs = self.tokenizer(var_text, return_tensors="pt").to(self.device)
         if inputs["input_ids"].shape[1] <= 1: return None
         losses = self.get_token_losses(inputs["input_ids"])
         if len(losses) == 0: return None
         return np.mean(losses)
 
-    def is_noisy_node(self, text):
+    def calc_active_influence(self, code_bytes, start_byte, end_byte, node_type, target_text, return_details=False):
+        prefix = code_bytes[:start_byte].decode("utf8", errors="ignore")
+        suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
+        
+        # 截取後續的上下文作為「受污染觀測區」
+        eval_suffix = suffix[:256] 
+        if len(eval_suffix) < 10: 
+            return (0.0, 0.0) if return_details else 0.0
+        
+        text_orig = prefix + target_text + eval_suffix
+        
+        if node_type == 'comment':
+            neutral_repl = "//" if target_text.startswith("//") else "/* */"
+        elif node_type == 'string':
+            neutral_repl = '""'
+        else: 
+            neutral_repl = "VAR_0"
+            
+        text_neutral = prefix + neutral_repl + eval_suffix
+        
+        inputs_orig = self.tokenizer(text_orig, return_tensors="pt").to(self.device)
+        inputs_neutral = self.tokenizer(text_neutral, return_tensors="pt").to(self.device)
+        
+        loss_orig_arr, hs_orig = self.get_losses_and_hidden_states(inputs_orig["input_ids"])
+        loss_neutral_arr, hs_neutral = self.get_losses_and_hidden_states(inputs_neutral["input_ids"])
+
+        loss_diff = np.mean(loss_orig_arr) - np.mean(loss_neutral_arr)
+
+        # === 創新特徵：計算 AST 邊界外的語義污染 (Semantic Bleed) ===
+        # 由於 prefix 長度固定，但 target_text 與 neutral_repl 長度不同，
+        # 導致 suffix 在兩組 input_ids 中的絕對位置不同。
+        # 我們利用「倒數 Token 對齊法」，精準抓取 suffix 區域的隱藏層狀態。
+        
+        # 計算 eval_suffix 在 Tokenizer 中大約佔用多少 Token
+        suffix_token_len = len(self.tokenizer(eval_suffix, add_special_tokens=False)["input_ids"])
+        
+        # 為了避免邊界誤差，我們取後綴區段的後半部 (穩定的上下文區域) 作為對齊基準
+        align_len = max(5, int(suffix_token_len * 0.8))
+        
+        if hs_orig[-1].size(1) < align_len or hs_neutral[-1].size(1) < align_len:
+            return (loss_diff, 0.0) if return_details else loss_diff
+        
+        # 提取深層 (倒數第二層或最後一級) 中，屬於「後續程式碼」的隱藏狀態
+        # shape: (align_len, hidden_size)
+        suffix_hs_orig = hs_orig[-1][0][-align_len:]
+        suffix_hs_neutral = hs_neutral[-1][0][-align_len:]
+        
+        # 測量替換節點後，後方「未被修改的程式碼」的語義偏移程度
+        cos_sim_suffix = F.cosine_similarity(suffix_hs_orig, suffix_hs_neutral, dim=-1)
+        
+        # 污染指數 (Bleed Index)：若後續無關程式碼的表示發生劇烈位移，則代表發生越界控制
+        # 我們取 Mean 與 Max 結合，確保既有整體偏移，也能捕捉局部強烈污染
+        bleed_mean = (1.0 - cos_sim_suffix).mean().item()
+        bleed_max = (1.0 - cos_sim_suffix).max().item()
+        bleed_index = (bleed_mean + bleed_max) / 2.0
+        
+        # 以非線性倍率放大污染指數，作為懲罰權重
+        # 當 bleed_index 越過閾值 (例如 0.15) 時，權重急遽上升
+        bleed_penalty = np.exp(max(0, bleed_index - 0.15) * 15.0)
+        
+        total_influence = loss_diff * bleed_penalty
+        
+        if return_details:
+            return total_influence, bleed_index
+        return total_influence
+
+    def is_noisy_variable(self, text):
         if text.startswith(self.noise_prefixes): return True
         if text.endswith(self.noise_suffixes): return True
         return False
@@ -58,59 +137,11 @@ class SemanticGuardrail:
         if next_chars.startswith('('): return 'FUNC'
         return 'NORMAL'
 
-    def calc_localized_active_influence(self, code_bytes, start_byte, end_byte, node_type, target_text):
-        """
-        Semantic Control & Information Flow Shift 
-        引入上下文全域替換 (Global Replacement) 以應對多次出現的惡意變數/註解
-        """
-        prefix_str = code_bytes[:start_byte].decode("utf8", errors="ignore")[-512:]
-        suffix_str = code_bytes[end_byte:].decode("utf8", errors="ignore")[:512]
-        
-        neutral_repl = '""' if node_type == 'string' else ("//" if target_text.startswith("//") else "VAR_0")
-        
-        # 進行全域替換，徹底抹除該文本在當前上下文視窗中的所有出現痕跡
-        text_orig = prefix_str + target_text + suffix_str
-        text_neut = text_orig.replace(target_text, neutral_repl)
-        
-        ids_orig = self.tokenizer(text_orig, return_tensors="pt", truncation=True, max_length=1024)["input_ids"].to(self.device)
-        ids_neut = self.tokenizer(text_neut, return_tensors="pt", truncation=True, max_length=1024)["input_ids"].to(self.device)
-        
-        with torch.no_grad():
-            out_orig = self.model(ids_orig, output_attentions=True)
-            out_neut = self.model(ids_neut, output_attentions=True)
-            
-        logits_orig = out_orig.logits[0]  
-        logits_neut = out_neut.logits[0]
-        
-        # 全域替換會導致序列長度不同，取兩者最小長度進行張量對齊
-        min_len = min(logits_orig.shape[0], logits_neut.shape[0])
-        
-        kl_div_score = 0.0
-        attn_shift_score = 0.0
-        
-        if min_len > 0:
-            # 1. Distributional Divergence (KL Divergence)
-            P = F.softmax(logits_orig[:min_len], dim=-1)
-            log_Q = F.log_softmax(logits_neut[:min_len], dim=-1)
-            kl_div_score = F.kl_div(log_Q, P, reduction='batchmean').item()
-            
-            # 2. Attention Shift (Information Flow Perturbation)
-            attentions_orig = out_orig.attentions[-3:] 
-            attentions_neut = out_neut.attentions[-3:]
-            
-            total_shift = 0.0
-            for layer_orig, layer_neut in zip(attentions_orig, attentions_neut):
-                attn_o = layer_orig[0].mean(dim=0)[:min_len, :min_len]
-                attn_n = layer_neut[0].mean(dim=0)[:min_len, :min_len]
-                total_shift += torch.norm(attn_o - attn_n, p='fro').item()
-                
-            attn_shift_score = total_shift / (min_len + 1e-5)
-            
-        joint_influence = kl_div_score + 0.1 * np.log1p(attn_shift_score)
-        
-        return float(joint_influence)
-
     def detect(self, code):
+        """
+        執行 Layer 3 Active Verify
+        Returns: is_attack (bool), repaired_code (str), debug_info (list)
+        """
         if not code: return False, code, []
         code_bytes = bytes(code, "utf8")
 
@@ -126,20 +157,20 @@ class SemanticGuardrail:
         except:
             return False, code, []
 
-        node_ranges = []
+        var_ranges = []
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
             
             if type_name == 'identifier':
                 if len(text) < 4 or text in self.whitelist: continue
-                is_noisy = self.is_noisy_node(text)
+                is_noisy = self.is_noisy_variable(text)
                 token_type = self.get_token_type(code, node, text)
             else:
                 if len(text) < 10: continue
                 is_noisy = False
                 token_type = type_name.upper()
             
-            node_ranges.append({
+            var_ranges.append({
                 'start': node.start_byte, 
                 'end': node.end_byte, 
                 'text': text, 
@@ -148,32 +179,32 @@ class SemanticGuardrail:
                 'node_type': type_name
             })
 
-        node_ctx_map = defaultdict(list)
-        node_meta_map = {} 
+        var_ctx_map = defaultdict(list)
+        var_meta_map = {} 
         
         for i, loss in enumerate(ctx_losses):
             token_idx = i + 1
             if token_idx >= len(offsets): break
             start_off, end_off = offsets[token_idx]
-            for node_info in node_ranges:
-                if start_off >= node_info['start'] and end_off <= node_info['end']:
-                    node_text = node_info['text']
-                    node_ctx_map[node_text].append(loss)
-                    if node_text not in node_meta_map:
-                        node_meta_map[node_text] = node_info
+            for v_info in var_ranges:
+                if start_off >= v_info['start'] and end_off <= v_info['end']:
+                    node_key = (v_info['start'], v_info['end'], v_info['text'])
+                    var_ctx_map[node_key].append(loss)
+                    var_meta_map[node_key] = v_info
                     break 
 
         candidates = []
-        for node_text, losses in node_ctx_map.items():
+        for node_key, losses in var_ctx_map.items():
             max_ctx = np.max(losses)
             if max_ctx > 4.0: 
-                prior = self.get_prior_loss(node_text)
+                var_text = node_key[2] 
+                prior = self.get_prior_loss(var_text)
                 if prior is None: continue
                 surprise_score = max(0.0, max_ctx - prior)
                 candidates.append({
-                    'node': node_text, 
+                    'var': var_text, 
                     'surprise_score': surprise_score, 
-                    'meta': node_meta_map[node_text]
+                    'meta': var_meta_map[node_key]
                 })
 
         if not candidates: 
@@ -187,18 +218,21 @@ class SemanticGuardrail:
         debug_info = []
 
         for cand in top_candidates:
-            node_text = cand['node']
+            var = cand['var']
             surprise = cand['surprise_score']
             meta = cand['meta']
             
-            influence = self.calc_localized_active_influence(code_bytes, meta['start'], meta['end'], meta['node_type'], node_text)
+            # [修改] 傳入 return_details=True 來獲取隱藏層特徵細節
+            influence, rep_shift, spike_score, layer_amp = self.calc_active_influence(
+                code_bytes, meta['start'], meta['end'], meta['node_type'], var, return_details=True
+            )
             
             dynamic_threshold = self.base_influence_th * (1.0 + (surprise * self.surprise_tolerance))
             if meta['is_noisy']: dynamic_threshold *= 0.8
             if meta['type'] in ('FUNC', 'MACRO'): 
                 dynamic_threshold *= 2.5
             elif meta['type'] in ('STRING', 'COMMENT'):
-                dynamic_threshold *= 1.5 
+                dynamic_threshold *= 5.0
             
             triggered = False
             if influence > dynamic_threshold:
@@ -207,10 +241,14 @@ class SemanticGuardrail:
                 is_attack = True
             
             debug_info.append({
-                "node": node_text[:50].replace('\n', ' '), 
+                "var": var[:50].replace('\n', ' '),
                 "surprise": float(surprise),
                 "influence": float(influence),
-                "joint_influence": float(influence), 
+                "hidden_states_debug": {
+                    "rep_shift": float(rep_shift),
+                    "spike_score": float(spike_score),
+                    "layer_amplification": float(layer_amp)
+                },
                 "threshold": float(dynamic_threshold),
                 "is_noisy": meta['is_noisy'],
                 "type": meta['type'],
