@@ -1,3 +1,5 @@
+import os
+os.environ['MPLBACKEND'] = 'Agg'
 import json
 import re
 import time
@@ -102,7 +104,7 @@ def batch_attention_analyze(analyzers, dataset, flash_json_path, flash_code_par_
         print('analyzer: ', model.__class__.__name__)
 
         if dataset == 'messiq_dataset':
-            parent_dir = 'data/{dataset}'
+            parent_dir = f'data/{dataset}'
             file_format = '.sol'
             output_dir = f'results/attention_view_vmax1/{model.__class__.__name__}/{dataset}'
             compute_attention_for_source_files(source_dir=parent_dir, file_format=file_format, output_dir=output_dir, model=model)

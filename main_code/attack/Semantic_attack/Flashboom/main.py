@@ -1,4 +1,7 @@
+import os
+os.environ['MPLBACKEND'] = 'Agg'
 import argparse
+
 
 def main(args):
     

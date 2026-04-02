@@ -21,30 +21,17 @@ class Mixtral(BaseAuditor):
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
-        # self.model = AutoModelForCausalLM.from_pretrained(
-        #     self.model_id,
-        #     quantization_config=quantization_config,
-        #     device_map="auto",
-        # )
-
-        # self.tokenizer = AutoTokenizer.from_pretrained(
-        #     self.model_id
-        # )
-
-
-        local_model_dir = os.path.expanduser('~/.cache/huggingface/hub/models--mistralai--Mistral-7B-Instruct-v0.2/snapshots/3ad372fc79158a2148299e3318516c786aeded6c')
-        
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_id,
+            quantization_config=quantization_config,
+            device_map="auto",
+        )
+                
         max_memory = {
             0:'30GiB',
         }
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            local_model_dir,
-            quantization_config=quantization_config,
-            device_map="auto",
-            #max_memory=max_memory
-        )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
-            local_model_dir
+            self.model_id
         )

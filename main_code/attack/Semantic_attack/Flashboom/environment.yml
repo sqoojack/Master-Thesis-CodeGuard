@@ -1,9 +1,11 @@
-name: llm
+name: flashboom
 channels:
   - pytorch
   - conda-forge
   - defaults
 dependencies:
+  - cuda-nvcc
+  - cuda-toolkit
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
   - aiohttp=3.9.5=py312h5eee18b_0
