@@ -2,6 +2,11 @@
 
 CodeGuard is a comprehensive framework designed to evaluate and defend Code Large Language Models (Code LLMs) against various malicious exploits, including Prompt Injection, Adversarial Attacks, and Semantic Attacks. 
 
+### Problem Overview
+![Problem Overview](images/Problem_Overview.png)
+### Solution Overview
+![Problem Overview](images/Solution_Overview.png)
+
 ## Features
 
 * **Multi-Attack Simulation**: Simulates diverse attack vectors against Code LLMs, including Adversarial Attacks, Semantic Attacks, Adaptive Attacks, and XOXO Attacks.
