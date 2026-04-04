@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 import numpy as np
 import re
 from collections import defaultdict
@@ -33,7 +32,6 @@ class SemanticGuardrail:
                                 '_ops', '_cb', '_ctx', '_t', '_s', '_eq', '_ne', '_impl', '_handler')
 
     def get_token_losses(self, input_ids):
-        """僅計算 Loss (用於快速掃描)"""
         with torch.no_grad():
             outputs = self.model(input_ids, labels=input_ids)
             shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -42,34 +40,62 @@ class SemanticGuardrail:
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.detach().cpu().to(torch.float32).numpy()
 
-    def get_losses_and_hidden_states(self, input_ids):
-        """計算 Loss 並同時回傳隱藏層特徵 (用於深度驗證)"""
-        with torch.no_grad():
-            outputs = self.model(input_ids, labels=input_ids, output_hidden_states=True)
-            shift_logits = outputs.logits[..., :-1, :].contiguous()
-            shift_labels = input_ids[..., 1:].contiguous()
-            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
-            losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            return losses.detach().cpu().to(torch.float32).numpy(), outputs.hidden_states
-
     def get_prior_loss(self, var_text):
         inputs = self.tokenizer(var_text, return_tensors="pt").to(self.device)
         if inputs["input_ids"].shape[1] <= 1: return None
         losses = self.get_token_losses(inputs["input_ids"])
         if len(losses) == 0: return None
         return np.mean(losses)
+    
+    def extract_features_isolated(self, code_bytes, parser, language, sem_guard):
+        tree = parser.parse(code_bytes)
+        query_func = language.query("(function_definition) @func")
+        captures = query_func.captures(tree.root_node)
+        
+        isolated_features = []
+        
+        for node, _ in captures:
+            func_text = node.text.decode("utf8", errors="ignore")
+            
+            inputs = sem_guard.tokenizer(
+                func_text, 
+                return_tensors="pt", 
+                truncation=True, 
+                max_length=512, 
+                return_offsets_mapping=True
+            )
+            
+            input_ids = inputs["input_ids"].to(sem_guard.device)
+            ctx_losses = sem_guard.get_token_losses(input_ids)
+            
+            max_loss = float(ctx_losses.max())
+            # print(f"[ISOLATION] Function analyzed. Max Context Loss: {max_loss:.4f}")
+            
+            isolated_features.append({
+                "func_name": self.get_function_name(node, language), # Added self.
+                "max_loss": max_loss,
+                "span": (node.start_byte, node.end_byte)
+            })
+            
+        return isolated_features
 
-    def calc_active_influence(self, code_bytes, start_byte, end_byte, node_type, target_text, return_details=False):
+    def get_function_name(self, func_node, language):
+        for child in func_node.children:
+            if child.type == "identifier":
+                return child.text.decode("utf8")
+        return "anonymous"
+
+    def calc_active_influence(self, code_bytes, start_byte, end_byte, node_type, target_text):
+        # 利用 byte offset 切出 prefix 與 suffix
         prefix = code_bytes[:start_byte].decode("utf8", errors="ignore")
         suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
         
-        # 截取後續的上下文作為「受污染觀測區」
         eval_suffix = suffix[:256] 
-        if len(eval_suffix) < 10: 
-            return (0.0, 0.0) if return_details else 0.0
+        if len(eval_suffix) < 10: return 0.0
         
         text_orig = prefix + target_text + eval_suffix
         
+        # 依據節點類型，採用最準確的中性狀態
         if node_type == 'comment':
             neutral_repl = "//" if target_text.startswith("//") else "/* */"
         elif node_type == 'string':
@@ -79,51 +105,10 @@ class SemanticGuardrail:
             
         text_neutral = prefix + neutral_repl + eval_suffix
         
-        inputs_orig = self.tokenizer(text_orig, return_tensors="pt").to(self.device)
-        inputs_neutral = self.tokenizer(text_neutral, return_tensors="pt").to(self.device)
+        loss_orig = np.mean(self.get_token_losses(self.tokenizer(text_orig, return_tensors="pt").to(self.device)["input_ids"]))
+        loss_neutral = np.mean(self.get_token_losses(self.tokenizer(text_neutral, return_tensors="pt").to(self.device)["input_ids"]))
         
-        loss_orig_arr, hs_orig = self.get_losses_and_hidden_states(inputs_orig["input_ids"])
-        loss_neutral_arr, hs_neutral = self.get_losses_and_hidden_states(inputs_neutral["input_ids"])
-
-        loss_diff = np.mean(loss_orig_arr) - np.mean(loss_neutral_arr)
-
-        # === 創新特徵：計算 AST 邊界外的語義污染 (Semantic Bleed) ===
-        # 由於 prefix 長度固定，但 target_text 與 neutral_repl 長度不同，
-        # 導致 suffix 在兩組 input_ids 中的絕對位置不同。
-        # 我們利用「倒數 Token 對齊法」，精準抓取 suffix 區域的隱藏層狀態。
-        
-        # 計算 eval_suffix 在 Tokenizer 中大約佔用多少 Token
-        suffix_token_len = len(self.tokenizer(eval_suffix, add_special_tokens=False)["input_ids"])
-        
-        # 為了避免邊界誤差，我們取後綴區段的後半部 (穩定的上下文區域) 作為對齊基準
-        align_len = max(5, int(suffix_token_len * 0.8))
-        
-        if hs_orig[-1].size(1) < align_len or hs_neutral[-1].size(1) < align_len:
-            return (loss_diff, 0.0) if return_details else loss_diff
-        
-        # 提取深層 (倒數第二層或最後一級) 中，屬於「後續程式碼」的隱藏狀態
-        # shape: (align_len, hidden_size)
-        suffix_hs_orig = hs_orig[-1][0][-align_len:]
-        suffix_hs_neutral = hs_neutral[-1][0][-align_len:]
-        
-        # 測量替換節點後，後方「未被修改的程式碼」的語義偏移程度
-        cos_sim_suffix = F.cosine_similarity(suffix_hs_orig, suffix_hs_neutral, dim=-1)
-        
-        # 污染指數 (Bleed Index)：若後續無關程式碼的表示發生劇烈位移，則代表發生越界控制
-        # 我們取 Mean 與 Max 結合，確保既有整體偏移，也能捕捉局部強烈污染
-        bleed_mean = (1.0 - cos_sim_suffix).mean().item()
-        bleed_max = (1.0 - cos_sim_suffix).max().item()
-        bleed_index = (bleed_mean + bleed_max) / 2.0
-        
-        # 以非線性倍率放大污染指數，作為懲罰權重
-        # 當 bleed_index 越過閾值 (例如 0.15) 時，權重急遽上升
-        bleed_penalty = np.exp(max(0, bleed_index - 0.15) * 15.0)
-        
-        total_influence = loss_diff * bleed_penalty
-        
-        if return_details:
-            return total_influence, bleed_index
-        return total_influence
+        return loss_orig - loss_neutral
 
     def is_noisy_variable(self, text):
         if text.startswith(self.noise_prefixes): return True
@@ -161,14 +146,16 @@ class SemanticGuardrail:
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
             
+            # 分類處理：只有 identifier 需要套用 whitelist 和特殊類型判斷
             if type_name == 'identifier':
                 if len(text) < 4 or text in self.whitelist: continue
                 is_noisy = self.is_noisy_variable(text)
                 token_type = self.get_token_type(code, node, text)
             else:
+                # 註解與字串若太短則略過
                 if len(text) < 10: continue
                 is_noisy = False
-                token_type = type_name.upper()
+                token_type = type_name.upper() # 'COMMENT' 或 'STRING'
             
             var_ranges.append({
                 'start': node.start_byte, 
@@ -188,6 +175,7 @@ class SemanticGuardrail:
             start_off, end_off = offsets[token_idx]
             for v_info in var_ranges:
                 if start_off >= v_info['start'] and end_off <= v_info['end']:
+                    # 使用唯一的 key (包含座標)，防止相同內容的註解或變數被合併計算
                     node_key = (v_info['start'], v_info['end'], v_info['text'])
                     var_ctx_map[node_key].append(loss)
                     var_meta_map[node_key] = v_info
@@ -197,7 +185,7 @@ class SemanticGuardrail:
         for node_key, losses in var_ctx_map.items():
             max_ctx = np.max(losses)
             if max_ctx > 4.0: 
-                var_text = node_key[2] 
+                var_text = node_key[2] # 取得文字內容
                 prior = self.get_prior_loss(var_text)
                 if prior is None: continue
                 surprise_score = max(0.0, max_ctx - prior)
@@ -213,7 +201,7 @@ class SemanticGuardrail:
         candidates.sort(key=lambda x: x['surprise_score'], reverse=True)
         top_candidates = candidates[:20]
         
-        toxic_nodes = [] 
+        toxic_nodes = [] # 修正：這裡要與下方一致
         is_attack = False
         debug_info = []
 
@@ -222,10 +210,8 @@ class SemanticGuardrail:
             surprise = cand['surprise_score']
             meta = cand['meta']
             
-            # [修改] 傳入 return_details=True 來獲取隱藏層特徵細節
-            influence, rep_shift, spike_score, layer_amp = self.calc_active_influence(
-                code_bytes, meta['start'], meta['end'], meta['node_type'], var, return_details=True
-            )
+            # 使用 AST 精準座標進行影響力計算
+            influence = self.calc_active_influence(code_bytes, meta['start'], meta['end'], meta['node_type'], var)
             
             dynamic_threshold = self.base_influence_th * (1.0 + (surprise * self.surprise_tolerance))
             if meta['is_noisy']: dynamic_threshold *= 0.8
@@ -241,15 +227,10 @@ class SemanticGuardrail:
                 is_attack = True
             
             debug_info.append({
-                "var": var[:50].replace('\n', ' '),
-                "surprise": float(surprise),
-                "influence": float(influence),
-                "hidden_states_debug": {
-                    "rep_shift": float(rep_shift),
-                    "spike_score": float(spike_score),
-                    "layer_amplification": float(layer_amp)
-                },
-                "threshold": float(dynamic_threshold),
+                "var": var[:50].replace('\n', ' '), # 截斷顯示避免 log 過長
+                "surprise": surprise,
+                "influence": influence,
+                "threshold": dynamic_threshold,
                 "is_noisy": meta['is_noisy'],
                 "type": meta['type'],
                 "triggered": triggered
@@ -257,6 +238,7 @@ class SemanticGuardrail:
 
         repaired_code = code
         if is_attack:
+            # 重要：由後往前替換，避免位移導致座標失效
             toxic_nodes.sort(key=lambda x: x['start'], reverse=True)
             new_code_bytes = bytearray(code_bytes)
             for idx, meta in enumerate(toxic_nodes):

@@ -9,12 +9,22 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     -o result/sanitized_data/CodeGuard_sanitized_XOXO_0.02_0.05.jsonl
     
 ShadowCode:
-CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     -A 9 \
     -L3_b 100.020 \
     -L3_t 100.05 \
     -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
     -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
+    
+Flashboom:
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
+    -A 14.50 \
+    --th_string 13.00 \
+    -L3_b 0.088 \
+    -L3_t 0.11 \
+    -i Dataset/Flashboom/flashboom_dataset.jsonl \
+    -o result/sanitized_data/flashboom/CodeGuard.jsonl
+        
     
 Merged:
 CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \

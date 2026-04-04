@@ -28,26 +28,28 @@ class PreFilter:
         self.error_query = self.language.query("(ERROR) @error")
 
     def _check_structural_anomaly(self, text, node_type):
-        """檢查文本的結構異常，取代資訊熵以消除自然語言誤判"""
         if len(text) < 15:
             return False, None
             
-        # 1. 檢查超長連續字元 (無空白)，攔截 Base64 / Hex payload
-        max_word_len = max((len(w) for w in text.split()), default=0)
-        if max_word_len > 80:
-            return True, f"Long_Continuous_String ({max_word_len})"
+        # Skip anomaly checks for comments completely
+        if node_type == 'comment':
+            return False, None
             
-        # 2. 檢查特殊符號密度 (攔截指令注入與模板注入)
-        # 排除常規標點符號 (.,:;-_)，專注於程式邏輯符號
+        # Only check word length for identifiers or other nodes, skip string_literal
+        if node_type != 'string_literal':
+            max_word_len = max((len(w) for w in text.split()), default=0)
+            if max_word_len > 200:
+                return True, f"Long_Continuous_String ({max_word_len})"
+            
+        # Symbol density check
         special_chars = set("{}[]()=><$|\\\"'`~^")
         special_count = sum(1 for c in text if c in special_chars)
         special_ratio = special_count / len(text)
         
-        threshold = 0.3 if node_type == 'string_literal' else 0.2
+        threshold = 0.5 if node_type == 'string_literal' else 0.4
         if special_ratio > threshold:
             return True, f"High_Special_Char_Ratio ({special_ratio:.2f})"
             
-        # 3. 檢查異常字元區塊 (攔截韓文、盲文等非預期字元夾帶)
         non_ascii_count = sum(1 for c in text if ord(c) > 127)
         if non_ascii_count > 5 and (non_ascii_count / len(text)) > 0.15:
             return True, "Abnormal_Non_ASCII_Ratio"

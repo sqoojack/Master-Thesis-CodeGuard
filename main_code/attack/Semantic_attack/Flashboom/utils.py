@@ -310,6 +310,8 @@ def linewise_attention_from_csv(csv_path)->list:
         sum_of_lines = matrix.sum(axis=1)
     elif matrix.ndim == 1:
         sum_of_lines = [matrix.sum(axis=0)]
+    if isinstance(sum_of_lines, list):
+        return sum_of_lines
     return sum_of_lines.tolist()
 
 '''

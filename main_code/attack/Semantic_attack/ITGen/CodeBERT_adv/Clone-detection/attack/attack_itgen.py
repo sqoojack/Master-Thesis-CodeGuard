@@ -25,7 +25,7 @@ from transformers import RobertaForMaskedLM
 from transformers import (RobertaConfig, RobertaModel, RobertaTokenizer)
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-warnings.simplefilter(action='ignore', category=FutureWarning)  # Only report warning
+warnings.filterwarnings("ignore")  # Only report warning
 
 MODEL_CLASSES = {
     'roberta': (RobertaConfig, RobertaModel, RobertaTokenizer)
@@ -105,7 +105,7 @@ def main():
 
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
-                                          cache_dir=args.cache_dir if args.cache_dir else None)
+                                        cache_dir=args.cache_dir if args.cache_dir else None)
     config.num_labels = 2
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name,
                                                 do_lower_case=False,
@@ -148,7 +148,20 @@ def main():
 
     code_tokens = []
     for index, code in enumerate(source_codes):
-        code_tokens.append(get_identifiers(code[2], "java")[1])
+        try:
+            # Check if code[2] is a string and not empty
+            if isinstance(code[2], str) and code[2].strip():
+                identifiers_result = get_identifiers(code[2], "java")
+                
+                if identifiers_result is not None and len(identifiers_result) > 1:
+                    code_tokens.append(identifiers_result[1])
+            else:
+                # If it's an int or empty string, skip it
+                continue
+                
+        except Exception as e:
+            print(f"Skipping index {index} due to parser error: {e}")
+            continue
 
     id2token, _ = build_vocab(code_tokens, 5000)
 
@@ -158,8 +171,26 @@ def main():
     start_time = time.time()
     query_times = 0
     uid_pattern = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
-    with open(args.csv_store_path, "w") as wf:
+    
+    output_folder = os.path.dirname(args.csv_store_path)
+    if output_folder and not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    print(f"Total number of indices: {len(eval_dataset)}")
+    # with open(args.csv_store_path, "w") as wf:
+    # 1. 將 "w" 改為 "a" 以進行追加寫入
+    with open(args.csv_store_path, "a") as wf:
         for index, example in enumerate(eval_dataset):
+            # if index >= 200:
+            #     break
+            
+            # 2. 跳過已經跑過的 Index 0 ~ 200
+            if index < 1001:
+                continue
+                
+            # 3. 設定執行到 Index 1000 就停止
+            if index > 1300:
+                break
+            
             tmp_save = {"Index":None,"Original Code":None,"Adversarial Code":None,"Program Length":None,"Identifier Num":None,"Replaced Identifiers":None,"Query Times":None,"Time Cost":None,"Type":None}
             print("Index: ", index)
             code_pair = source_codes[index]
@@ -176,7 +207,20 @@ def main():
             identifiers = list(substitutes.keys())
             if len(identifiers) == 0:
                 continue
-            selected_tmp_sub = random.sample(id2token, len(substitutes.keys())*50)
+            
+            num_required = len(identifiers) * 50
+            
+            if not id2token:
+                # 如果詞表為空，無法進行替換，跳過此樣本
+                print(f"Index {idx}: id2token is empty, skipping.")
+                continue
+
+            if len(id2token) >= num_required:
+                selected_tmp_sub = random.sample(id2token, num_required)
+            else:
+                # 如果可用標識符不足，使用有放回抽樣 (random.choices)
+                selected_tmp_sub = random.choices(id2token, k=num_required)
+                
             sublists = [selected_tmp_sub[i:i+50] for i in range(0, len(selected_tmp_sub), 50)]
             tmp_sub = []
             for sub in sublists:
@@ -190,7 +234,15 @@ def main():
             total_cnt += 1
 
             example_start_time = time.time()
-            adv_code, is_success, replaced_words = attacker.itgen_attack(example, selected_sub, code_pair, query_times, logits, example_start_time)
+            try:
+                adv_code, is_success, replaced_words = attacker.itgen_attack(example, selected_sub, code_pair, query_times, logits, example_start_time)
+            except IndexError as e:
+                print(f"Skipping Index {index} due to Parser IndexError: {e}")
+                adv_code, is_success, replaced_words = None, 0, None
+            except Exception as e:
+                print(f"Skipping Index {index} due to unexpected error: {e}")
+                adv_code, is_success, replaced_words = None, 0, None
+
             attack_type = "itgen"
 
             example_end_time = (time.time() - example_start_time) / 60

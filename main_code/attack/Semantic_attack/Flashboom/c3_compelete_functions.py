@@ -212,7 +212,7 @@ def batch_complete(analyzer, dataset, require, N):
         if dataset.endswith('_test'):
             source_dir = f'data/{dataset.split('_test')[0]}'
 
-        completer_name = 'GPT4o'
+        completer_name = 'Mixtral'
         completer = init_model(completer_name, max_new_tokens=1000)
         os.makedirs(complete_N_dir, exist_ok=True)
 

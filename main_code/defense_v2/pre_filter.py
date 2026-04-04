@@ -28,31 +28,67 @@ class PreFilter:
         self.error_query = self.language.query("(ERROR) @error")
 
     def _check_structural_anomaly(self, text, node_type):
-        """檢查文本的結構異常，取代資訊熵以消除自然語言誤判"""
         if len(text) < 15:
             return False, None
             
-        # 1. 檢查超長連續字元 (無空白)，攔截 Base64 / Hex payload
-        max_word_len = max((len(w) for w in text.split()), default=0)
-        if max_word_len > 80:
-            return True, f"Long_Continuous_String ({max_word_len})"
+        # Skip anomaly checks for comments completely
+        if node_type == 'comment':
+            return False, None
             
-        # 2. 檢查特殊符號密度 (攔截指令注入與模板注入)
-        # 排除常規標點符號 (.,:;-_)，專注於程式邏輯符號
+        # Only check word length for identifiers or other nodes, skip string_literal
+        if node_type != 'string_literal':
+            max_word_len = max((len(w) for w in text.split()), default=0)
+            if max_word_len > 200:
+                return True, f"Long_Continuous_String ({max_word_len})"
+            
+        # Symbol density check
         special_chars = set("{}[]()=><$|\\\"'`~^")
         special_count = sum(1 for c in text if c in special_chars)
         special_ratio = special_count / len(text)
         
-        threshold = 0.3 if node_type == 'string_literal' else 0.2
+        threshold = 0.5 if node_type == 'string_literal' else 0.4
         if special_ratio > threshold:
             return True, f"High_Special_Char_Ratio ({special_ratio:.2f})"
             
-        # 3. 檢查異常字元區塊 (攔截韓文、盲文等非預期字元夾帶)
         non_ascii_count = sum(1 for c in text if ord(c) > 127)
         if non_ascii_count > 5 and (non_ascii_count / len(text)) > 0.15:
             return True, "Abnormal_Non_ASCII_Ratio"
             
         return False, None
+    
+    def iterative_semantic_analysis(self, code, sem_guard, parser, language, max_iterations=2):
+        current_code = code
+        all_features = []
+        
+        for iteration in range(max_iterations):
+            inputs = sem_guard.tokenizer(
+                current_code, 
+                return_tensors="pt", 
+                truncation=True, 
+                max_length=2048, 
+                return_offsets_mapping=True
+            )
+            input_ids = inputs["input_ids"].to(sem_guard.device)
+            offsets = inputs["offset_mapping"][0].cpu().numpy()
+            
+            ctx_losses = sem_guard.get_token_losses(input_ids)
+            
+            loss_threshold = 5.0
+            high_loss_indices = [i for i, loss in enumerate(ctx_losses) if loss > loss_threshold]
+            
+            if not high_loss_indices:
+                break
+                
+            code_bytes = bytearray(current_code, "utf8")
+            for idx in high_loss_indices:
+                if idx + 1 < len(offsets):
+                    start_off, end_off = offsets[idx + 1]
+                    code_bytes[start_off:end_off] = b" " * (end_off - start_off)
+                    
+            current_code = code_bytes.decode("utf8", errors="ignore")
+            # print(f"[ITERATION {iteration}] Masked decoys. Analyzing remaining logic.")
+            
+        return current_code
 
     def detect(self, code):
         """
@@ -118,3 +154,34 @@ class PreFilter:
             repaired_code = new_code_bytes.decode("utf8", errors="ignore")
 
         return triggered, repaired_code, debug_info
+    
+    def prune_dead_decoys(self, tree, language, code_bytes):
+        """
+        Remove unused state variables (decoys) using AST static analysis.
+        """
+        query_state_vars = language.query("(state_variable_declaration (identifier) @var)")
+        query_assignments = language.query("(assignment_expression left: (identifier) @left right: (_) @right)")
+        
+        state_vars = {node.text.decode("utf8") for node, _ in query_state_vars.captures(tree.root_node)}
+        
+        active_spans = []
+        for node, _ in query_assignments.captures(tree.root_node):
+            var_name = node.text.decode("utf8")
+            if var_name in state_vars:
+                active_spans.append((node.start_byte, node.end_byte))
+                print(f"[PRUNING] Active state modification kept: {var_name}")
+                
+        # If no active spans are found, return original code to prevent returning empty string
+        if not active_spans:
+            return code_bytes.decode("utf8", errors="ignore")
+            
+        return self.extract_active_spans(code_bytes, active_spans)
+
+    def extract_active_spans(self, code_bytes, spans):
+        """
+        Reconstruct code keeping only the active byte spans.
+        """
+        result = bytearray(len(code_bytes))
+        for start, end in spans:
+            result[start:end] = code_bytes[start:end]
+        return result.decode("utf8", errors="ignore")

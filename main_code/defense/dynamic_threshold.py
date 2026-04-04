@@ -1,9 +1,15 @@
 """
+    ----------------------------------- Merged_dataset ------------------------------
     python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200
     python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B
+    ----------------------------------- Adaptive Attack ------------------------------
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/decoys_attack.jsonl -n 200
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl -n 200
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/contextual_attack.jsonl -n 200
+    ----------------------------------- ITGen & Flashboom ------------------------------
+    python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang solidity
+    python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B --lang solidity
 """
 import os
 import json
@@ -19,17 +25,47 @@ from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
 
-def setup_tree_sitter():
+import re
+
+def clean_dataset_metadata(code_text):
+    if not code_text:
+        return ""
+    
+    # Remove single line dataset annotations (e.g., // <yes> <report> ...)
+    cleaned_code = re.sub(r'//\s*<(yes|no)>\s*<report>.*', '', code_text, flags=re.IGNORECASE)
+    
+    # Remove metadata block comments containing source URLs or articles
+    cleaned_code = re.sub(r'/\*[\s\S]*?@(source|article|vulnerable_at_lines):[\s\S]*?\*/', '', cleaned_code)
+    
+    return cleaned_code
+
+def setup_tree_sitter(lang_name):
     ts_dir = "build"
-    repo_dir = os.path.join(ts_dir, "tree-sitter-c")
-    lib_path = os.path.join(ts_dir, "my-languages.so")
-    if not os.path.exists(ts_dir): os.makedirs(ts_dir)
+    repo_name = f"tree-sitter-{lang_name}"
+    repo_dir = os.path.join(ts_dir, repo_name)
+    lib_path = os.path.join(ts_dir, f"{lang_name}.so")
+
+    repo_map = {
+        "solidity": "https://github.com/JoranHonig/tree-sitter-solidity"
+    }
+    repo_url = repo_map.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
+
+    if not os.path.exists(ts_dir): 
+        os.makedirs(ts_dir)
+    
     if not os.path.exists(repo_dir):
-        os.system(f"git clone https://github.com/tree-sitter/tree-sitter-c {repo_dir}")
-        os.system(f"cd {repo_dir} && git checkout v0.21.3")
+        print(f"[-] Cloning {lang_name} parser from {repo_url}...")
+        os.system(f"git clone {repo_url} {repo_dir}")
+    
+    if lang_name.lower() == "solidity" and not os.path.exists(lib_path):
+        print(f"[-] Switching {lang_name} to compatible ABI version...")
+        os.system(f"cd {repo_dir} && git checkout $(git rev-list -n 1 --before='2023-10-01' master)")
+        
     if not os.path.exists(lib_path): 
+        print(f"[-] Building {lang_name} library...")
         Language.build_library(lib_path, [repo_dir])
-    return Language(lib_path, 'c')
+
+    return Language(lib_path, lang_name)
 
 class DummyArgs:
     def __init__(self, batch_size):
@@ -39,8 +75,8 @@ class DummyArgs:
         self.l3_surprise_tolerance = 0.10  # [修正] 對齊主程式預設的 0.10
         self.batch_size = batch_size
 
-def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, args):
-    """提取給定程式碼的結構與語義特徵，對齊實際 Guardrail 的計算邏輯"""
+# 新增debug模式
+def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, args, debug=False):
     features = {
         "regex_triggered": False,
         "adv_features": [],
@@ -49,9 +85,16 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     
     if not code: return features
     
-    # 1. Stage I: Regex Guardrail
-    reg_detected, stage1_code, _ = pre_filter.detect(code)
+    reg_detected, stage1_code, debug_info = pre_filter.detect(code)
     features["regex_triggered"] = reg_detected
+    
+    if debug:
+        print("\n" + "-"*40)
+        print(f"[DEBUG] Stage 1 - Triggered: {reg_detected}")
+        if reg_detected:
+            for info in debug_info:
+                print(f"  -> Reason: {info['type']} | Matched: {info['matched_text']}")
+        
     if reg_detected:
         return features
         
@@ -59,12 +102,15 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     try:
         tree = parser.parse(code_bytes)
     except:
+        if debug: print("[DEBUG] Parser Error")
         return features
 
-    # 2. Stage II: Adversarial Features Extraction
     query_adv = language.query("(comment) @comment (string_literal) @string (identifier) @identifier")
     captures_adv = query_adv.captures(tree.root_node)
     
+    if debug:
+        print(f"[DEBUG] Stage 2 - Adversarial Guardrail Candidates:")
+        
     for node, type_name in captures_adv:
         text = node.text.decode("utf8", errors='ignore')
         if len(text) < 10: continue
@@ -82,13 +128,24 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             "length_penalty": length_penalty,
             "whitelisted": whitelisted
         })
+        
+        if debug:
+            print(f"  -> Type: {type_name:<12} | Score: {score:.4f} | Penalty: {length_penalty:.4f} | Whitelisted: {whitelisted}")
 
-    # 3. Stage III: Semantic Features Extraction (Top-5 Surprise Logic)
-    inputs = sem_guard.tokenizer(stage1_code, return_tensors="pt", truncation=True, max_length=1024, return_offsets_mapping=True)
+    inputs = sem_guard.tokenizer(
+        stage1_code, 
+        return_tensors="pt", 
+        truncation=True, 
+        max_length=2048, 
+        return_offsets_mapping=True
+    )
     input_ids = inputs["input_ids"].to(sem_guard.device)
     offsets = inputs["offset_mapping"][0].cpu().numpy()
     ctx_losses = sem_guard.get_token_losses(input_ids)
     
+    if debug:
+        print(f"[DEBUG] Stage 3 - Semantic Guardrail Tokenizer Length: {len(input_ids[0])}")
+        
     query_sem = language.query("(identifier) @identifier (comment) @comment (string_literal) @string")
     captures_sem = query_sem.captures(tree.root_node)
     
@@ -128,10 +185,17 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
                 break 
 
     candidates = []
+    if debug:
+        print(f"[DEBUG] Stage 3 - Context Losses and Priors:")
+        
     for node_key, losses in var_ctx_map.items():
         max_ctx = np.max(losses)
-        if max_ctx > 4.0: 
-            var_text = node_key[2]
+        var_text = node_key[2]
+        
+        if debug:
+            print(f"  -> Candidate: {var_text[:30]:<30} | Max Context Loss: {max_ctx:.4f}")
+            
+        if max_ctx > 2.0: 
             prior = sem_guard.get_prior_loss(var_text)
             if prior is None: continue
             surprise_score = max(0.0, max_ctx - prior)
@@ -140,10 +204,16 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
                 'surprise': surprise_score, 
                 'meta': var_meta_map[node_key]
             })
+            
+            if debug:
+                print(f"     [+] Passed pre-filter | Prior: {prior:.4f} | Surprise: {surprise_score:.4f}")
 
     candidates.sort(key=lambda x: x['surprise'], reverse=True)
-    top_candidates = candidates[:5]
+    top_candidates = candidates[:10]
 
+    if debug:
+        print(f"[DEBUG] Stage 3 - Final Influence Computation (Top Candidates):")
+        
     for cand in top_candidates:
         meta = cand['meta']
         window_start = max(0, meta['start'] - 1500)
@@ -163,7 +233,11 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
                 "influence": influence,
                 "surprise": cand['surprise']
             })
+            if debug:
+                print(f"  -> Target: {cand['var'][:30]:<30} | Type: {meta['type']:<10} | Noisy: {meta['is_noisy']} | Influence: {influence:.6f}")
         except Exception as e:
+            if debug:
+                print(f"  -> [ERROR] Failed on {cand['var'][:30]}: {str(e)}")
             pass
 
     return features
@@ -268,12 +342,14 @@ def main():
     parser.add_argument("-n", "--num_samples", type=int, default=300, help="Number of samples to use (increased to prevent overfitting)")
     parser.add_argument("-bs", "--batch_size", type=int, default=16)
     parser.add_argument("--max_fpr", type=float, default=0.10, help="Maximum acceptable FPR (Stricter default)")
+    parser.add_argument("--lang", type=str, default="c", help="Target language (c, solidity, etc.)")
+    parser.add_argument("--debug_limit", type=int, default=3)
     args_cmd = parser.parse_args()
 
     # --- Initialization ---
-    C_LANGUAGE = setup_tree_sitter()
+    TARGET_LANGUAGE = setup_tree_sitter(args_cmd.lang)
     TS_PARSER = Parser()
-    TS_PARSER.set_language(C_LANGUAGE)
+    TS_PARSER.set_language(TARGET_LANGUAGE)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     print(f"[-] Loading Model for Feature Extraction: {args_cmd.model_id}...")
@@ -283,9 +359,9 @@ def main():
     model.eval()
 
     args_dummy = DummyArgs(args_cmd.batch_size)
-    pre_filter = PreFilter(TS_PARSER, C_LANGUAGE)
-    adv_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args_dummy)
-    sem_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args_dummy)
+    pre_filter = PreFilter(TS_PARSER, TARGET_LANGUAGE)
+    adv_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
+    sem_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
 
     # --- Data Loading & Sampling ---
     benign_codes = []
@@ -295,8 +371,12 @@ def main():
             if not line.strip(): continue
             try:
                 entry = json.loads(line)
-                if "code" in entry and entry["code"]: benign_codes.append(entry["code"])
-                if "adv_code" in entry and entry["adv_code"]: adv_codes.append(entry["adv_code"])
+                if "code" in entry and entry["code"]:
+                    clean_benign = clean_dataset_metadata(entry["code"])
+                    benign_codes.append(clean_benign)
+                if "adv_code" in entry and entry["adv_code"]:
+                    clean_adv = clean_dataset_metadata(entry["adv_code"])
+                    adv_codes.append(clean_adv)
             except: pass
             
     num_per_class = min(args_cmd.num_samples // 2, len(benign_codes), len(adv_codes))
@@ -307,13 +387,20 @@ def main():
     print(f"[-] Starting feature extraction on {num_per_class*2} validation samples...")
     extracted_data = []
     
-    for code in tqdm(selected_benign, desc="Extracting Benign", ncols=80):
-        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, C_LANGUAGE, args_dummy)
+    for i, code in enumerate(tqdm(selected_benign, desc="Extracting Benign", ncols=80)):
+        is_debug = (i < args_cmd.debug_limit)
+        if is_debug:
+            print(f"\n[DEBUG] --- Benign Sample {i} ---")
+            
+        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, TARGET_LANGUAGE, args_dummy, debug=is_debug)
         feat["label"] = 0
         extracted_data.append(feat)
         
-    for code in tqdm(selected_adv, desc="Extracting Adversarial", ncols=80):
-        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, C_LANGUAGE, args_dummy)
+    for i, code in enumerate(tqdm(selected_adv, desc="Extracting Adversarial", ncols=80)):
+        is_debug = (i < args_cmd.debug_limit)
+        if is_debug:
+            print(f"\n[DEBUG] --- Adversarial Sample {i} ---")
+        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, TARGET_LANGUAGE, args_dummy, debug=is_debug)
         feat["label"] = 1
         extracted_data.append(feat)
 
@@ -326,7 +413,7 @@ def main():
     adv_th_space = np.arange(8.0, 30.0, 0.5)
     str_th_space = np.arange(8.0, 30.0, 1.0)
     l3_th_space = np.arange(0.010, 0.300, 0.002)
-    l3_tolerance_space = np.arange(0.01, 0.20, 0.01)
+    l3_tolerance_space = np.arange(0.10, 0.30, 0.01)
 
     best_metrics = {"f1": -1.0, "fpr": 1.0, "score": -1.0}
     best_params = {}

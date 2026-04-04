@@ -225,6 +225,23 @@ class ITGen_Attacker(object):
         index_order = (-index_scores).argsort()
         return index_order
     
+    def update_queue(self, queue, index_dict):
+        """
+        根據塊（Block）的重要性得分重新對隊列進行排序。
+        """
+        if not queue:
+            return queue
+        
+        # 提取當前隊列中所有塊對應的索引列表
+        blocks = [index_dict[key] for key in queue]
+        
+        # 利用現有的 get_initial_block_order 方法計算新的排序索引
+        # 該方法會根據模型輸出計算各塊的重要性
+        new_order_indices = self.get_initial_block_order(blocks)
+        
+        # 根據計算出的新順序重新排列隊列
+        return [queue[i] for i in new_order_indices]
+    
     def init_before_loop(self):
         best_ind = self.hb.best_in_history()[3][0]
         initial_seq = self.hb.eval_X[best_ind]
@@ -343,16 +360,6 @@ class ITGen_Attacker(object):
 
         D_0, center_seq, center_ind, LOCAL_OPTIMUM, stage = self.init_before_loop()
 
-        while self.BLOCK_QUEUE:
-            stage_call, fX, X, fidx = self.exploration_ball_with_indices(center_seq=center_seq,n_samples=n_samples,ball_size=ex_ball_size,stage_call=stage_call, opt_indices=opt_indices, KEY=KEY, stage_init_ind=stage_init_ind)
-
-            if stage_call == -1:
-                new_code_tokens = self.seq2code(X)
-                is_success = self.is_success(new_code_tokens)
-                if is_success == 1:
-                    return self.adv_code(code_1, new_code_tokens), is_success, self.replaced_words(self.code_tokens_1, new_code_tokens)
-                else:
-                    return None, 0, None
         
         while self.BLOCK_QUEUE:
             if self.BLOCK_QUEUE[0][0] != stage:
