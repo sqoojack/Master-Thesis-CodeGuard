@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import re
 from collections import defaultdict
+import torch.nn.functional as F
 
 class SemanticGuardrail:
     def __init__(self, model, tokenizer, device, parser, language, args):
@@ -24,6 +25,13 @@ class SemanticGuardrail:
             'args', 'argv', 'argc', 'data', 'buffer', 'buf', 'count', 'idx', 'index', 'len', 'size',
             'start', 'end', 'min', 'max', 'ctx', 'context', 'out', 'in', 'ptr', 'value', 'val',
             'recv', 'send', 'read', 'write', 'open', 'close', 'self', 'this', 'user', 'password'
+            'public', 'private', 'protected', 'class', 'interface', 'extends', 'implements',
+            'import', 'package', 'boolean', 'String', 'throws', 'byte', 'new', 'try', 'catch',
+            'finally', 'throw', 'final', 'System', 'out', 'println', 'Exception', 'MessageDigest',
+            'getInstance', 'update', 'digest', 'length', 'getBytes'
+            'contract', 'function', 'modifier', 'require', 'revert', 'emit', 
+            'mapping', 'address', 'uint256', 'msg', 'sender', 'value', 'memory',
+            'calldata', 'storage', 'payable', 'view', 'pure', 'returns', 'event'
         }
         
         self.noise_prefixes = ('trace_', 'debug_', 'test_', 'assert_', 'sys_', 'standard_', 'std_', 'av_', 'ff_')
@@ -49,7 +57,11 @@ class SemanticGuardrail:
     
     def extract_features_isolated(self, code_bytes, parser, language, sem_guard):
         tree = parser.parse(code_bytes)
-        query_func = language.query("(function_definition) @func")
+        if language.name == "java":
+            query_str = "(method_declaration) @func"
+        else:
+            query_str = "(function_definition) @func"
+        query_func = language.query(query_str)
         captures = query_func.captures(tree.root_node)
         
         isolated_features = []
@@ -107,7 +119,6 @@ class SemanticGuardrail:
         
         loss_orig = np.mean(self.get_token_losses(self.tokenizer(text_orig, return_tensors="pt").to(self.device)["input_ids"]))
         loss_neutral = np.mean(self.get_token_losses(self.tokenizer(text_neutral, return_tensors="pt").to(self.device)["input_ids"]))
-        
         return loss_orig - loss_neutral
 
     def is_noisy_variable(self, text):
@@ -121,6 +132,63 @@ class SemanticGuardrail:
         next_chars = code[end_byte:end_byte+10].strip()
         if next_chars.startswith('('): return 'FUNC'
         return 'NORMAL'
+    
+    def calculate_ssd_index(self, node, context_loss, prior_loss):
+        # Calculate Semantic Surprise
+        semantic_surprise = max(0.0, context_loss - prior_loss)
+        
+        # Calculate AST structural depth
+        depth = 0
+        current = node
+        while current is not None:
+            depth += 1
+            current = current.parent
+            
+        # Calculate edges (e.g., number of arguments or assignments within node)
+        edges = len(node.children) if node.children else 1
+        
+        epsilon = 1e-5
+        ssd_index = semantic_surprise / (depth + edges + epsilon)
+        
+        return ssd_index
+    
+
+    def length_preserving_mask(self, code_bytes, start_off, end_off):
+        length = end_off - start_off
+        # 針對 Solidity 使用更常見的關鍵字長度作為填充，減少模型驚訝度
+        if length >= 7:
+            replacement = b"address" + b"_" * (length - 7)
+        elif length >= 4:
+            replacement = b"uint" + b"_" * (length - 4)
+        else:
+            replacement = b"v" * length
+            
+        code_bytes[start_off:end_off] = replacement
+        return code_bytes
+
+    def calculate_kl_divergence_shift(self, orig_input_ids, masked_input_ids):
+        # Get probability distributions
+        with torch.no_grad():
+            orig_logits = self.model(orig_input_ids).logits
+            masked_logits = self.model(masked_input_ids).logits
+            
+        # Convert to log probabilities
+        orig_log_probs = F.log_softmax(orig_logits, dim=-1)
+        masked_probs = F.softmax(masked_logits, dim=-1)
+        
+        # Calculate KL Divergence (Masked || Original)
+        kl_div = F.kl_div(orig_log_probs, masked_probs, reduction='batchmean')
+        return kl_div.item()
+
+    def evaluate_candidates_ssd(self, candidates, parser):
+        for cand in candidates:
+            node_meta = cand['meta']
+            ctx_loss = cand['max_ctx']
+            prior = cand['prior']
+            ssd = self.calculate_ssd_index(node_meta['ast_node'], ctx_loss, prior)
+            
+            if ssd > 1.5:
+                cand['is_decoy'] = True
 
     def detect(self, code):
         """
@@ -211,9 +279,26 @@ class SemanticGuardrail:
             meta = cand['meta']
             
             # 使用 AST 精準座標進行影響力計算
-            influence = self.calc_active_influence(code_bytes, meta['start'], meta['end'], meta['node_type'], var)
+            window_start = max(0, meta['start'] - 1500)
+            window_end = min(len(code_bytes), meta['end'] + 300)
+            local_bytes = code_bytes[window_start:window_end]
+            local_start = meta['start'] - window_start
+            local_end = meta['end'] - window_start
+
+            masked_bytes = bytearray(local_bytes)
+            masked_bytes = self.length_preserving_mask(masked_bytes, local_start, local_end)
+
+            orig_str = local_bytes.decode("utf8", errors="ignore")
+            masked_str = masked_bytes.decode("utf8", errors="ignore")
+
+            orig_inputs = self.tokenizer(orig_str, return_tensors="pt").to(self.device)["input_ids"]
+            masked_inputs = self.tokenizer(masked_str, return_tensors="pt").to(self.device)["input_ids"]
+
+            influence = self.calculate_kl_divergence_shift(orig_inputs, masked_inputs)
             
-            dynamic_threshold = self.base_influence_th * (1.0 + (surprise * self.surprise_tolerance))
+            max_multiplier = 2.0 
+            surprise_factor = min(1.0 + (surprise * self.surprise_tolerance), max_multiplier)
+            dynamic_threshold = self.base_influence_th * surprise_factor
             if meta['is_noisy']: dynamic_threshold *= 0.8
             if meta['type'] in ('FUNC', 'MACRO'): 
                 dynamic_threshold *= 2.5

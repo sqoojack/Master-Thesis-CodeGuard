@@ -3,7 +3,6 @@ python Dataset/ITGen/preprocess.py \
     --input Dataset/ITGen/attack_itgen_all.jsonl \
     --output Dataset/ITGen/itgen_dataset.jsonl \
     --source "ITGen"
-
 """
 import os
 import json

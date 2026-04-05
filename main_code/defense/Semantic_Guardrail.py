@@ -48,16 +48,17 @@ class SemanticGuardrail:
         return np.mean(losses)
 
     def calc_active_influence(self, code_bytes, start_byte, end_byte, node_type, target_text):
-        # 利用 byte offset 切出 prefix 與 suffix
         prefix = code_bytes[:start_byte].decode("utf8", errors="ignore")
-        suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
         
+        # Use local window to prevent loss dilution from extreme long prefix
+        local_prefix = prefix[-500:] if len(prefix) > 500 else prefix
+        
+        suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
         eval_suffix = suffix[:256] 
         if len(eval_suffix) < 10: return 0.0
         
-        text_orig = prefix + target_text + eval_suffix
+        text_orig = local_prefix + target_text + eval_suffix
         
-        # 依據節點類型，採用最準確的中性狀態
         if node_type == 'comment':
             neutral_repl = "//" if target_text.startswith("//") else "/* */"
         elif node_type == 'string':
@@ -65,7 +66,7 @@ class SemanticGuardrail:
         else: 
             neutral_repl = "VAR_0"
             
-        text_neutral = prefix + neutral_repl + eval_suffix
+        text_neutral = local_prefix + neutral_repl + eval_suffix
         
         loss_orig = np.mean(self.get_token_losses(self.tokenizer(text_orig, return_tensors="pt").to(self.device)["input_ids"]))
         loss_neutral = np.mean(self.get_token_losses(self.tokenizer(text_neutral, return_tensors="pt").to(self.device)["input_ids"]))
@@ -178,9 +179,11 @@ class SemanticGuardrail:
             dynamic_threshold = self.base_influence_th * (1.0 + (surprise * self.surprise_tolerance))
             if meta['is_noisy']: dynamic_threshold *= 0.8
             if meta['type'] in ('FUNC', 'MACRO'): 
-                dynamic_threshold *= 2.5
-            elif meta['type'] in ('STRING', 'COMMENT'):
-                dynamic_threshold *= 5.0
+                dynamic_threshold *= 1.2
+            if meta['type'] == 'STRING':
+                dynamic_threshold *= 3.0  # Reduced from 5.0
+            elif meta['type'] == 'COMMENT':
+                dynamic_threshold *= 4.0  # Reduced from 5.0
             
             triggered = False
             if influence > dynamic_threshold:

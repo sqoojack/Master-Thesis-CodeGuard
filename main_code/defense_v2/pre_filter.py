@@ -23,42 +23,110 @@ class PreFilter:
         
         # 2. 節點查詢：必須包含 ERROR 節點，以捕捉破壞語法的注入攻擊
         self.string_query = self.language.query("(string_literal) @string")
-        self.comment_query = self.language.query("(comment) @comment")
+        if self.language.name == "java":
+            self.comment_query = self.language.query("[(line_comment) (block_comment)] @comment")
+        else:
+            self.comment_query = self.language.query("(comment) @comment")
         self.identifier_query = self.language.query("(identifier) @identifier")
         self.error_query = self.language.query("(ERROR) @error")
+        
+    def length_preserving_mask(self, code_bytes, start, end):
+        # Implementation of Length-Preserving Masking
+        length = end - start
+        if length >= 5:
+            replacement = b"VAR_D" + b"_" * (length - 5)
+        else:
+            replacement = b"V" + b"_" * (length - 1)
+        code_bytes[start:end] = replacement
+        return code_bytes
+    
+    def build_dfdg_and_prune(self, tree, language, code_bytes):
+        # Update sinks to include solidity specific state changes
+        query_sinks = language.query("""
+            (call_expression) @call
+            (assignment_expression) @assign
+            (emit_statement) @event
+        """)
+        sinks = query_sinks.captures(tree.root_node)
+        
+        active_nodes = set()
+        for sink_node, _ in sinks:
+            if sink_node.type == 'call_expression':
+                func_node = sink_node.child_by_field_name('function')
+                if func_node and func_node.text.decode('utf8', errors='ignore') in ['require', 'revert', 'assert']:
+                    continue
+            
+            current = sink_node
+            while current is not None:
+                if current.type == 'function_definition':
+                    active_nodes.add(current.start_byte)
+                    break
+                current = current.parent
+                
+        query_funcs = language.query("(function_definition) @func")
+        funcs = query_funcs.captures(tree.root_node)
+        
+        spans_to_remove = []
+        for func_node, _ in funcs:
+            func_name = ""
+            for child in func_node.children:
+                if child.type == "identifier":
+                    func_name = child.text.decode("utf8", errors="ignore")
+                    break
+            
+            # Target decoy functions: no active sinks and not a core contract function
+            if func_name not in ["constructor", "fallback", "receive"] and func_node.start_byte not in active_nodes:
+                spans_to_remove.append((func_node.start_byte, func_node.end_byte))
+                
+        if not spans_to_remove:
+            return code_bytes.decode("utf8", errors="ignore")
+            
+        # Reverse sort to safely delete from back to front without messing up byte indices
+        spans_to_remove.sort(key=lambda x: x[0], reverse=True)
+        new_code_bytes = bytearray(code_bytes)
+        for start, end in spans_to_remove:
+            del new_code_bytes[start:end]
+            
+        return new_code_bytes.decode("utf8", errors="ignore")
+    
+    def extract_active_spans(self, code_bytes, spans):
+        result = bytearray()
+        spans.sort(key=lambda x: x[0])
+        for start, end in spans:
+            result.extend(code_bytes[start:end])
+            result.extend(b"\n")
+        return result.decode("utf8", errors="ignore")
 
     def _check_structural_anomaly(self, text, node_type):
         if len(text) < 15:
             return False, None
             
-        # Skip anomaly checks for comments completely
         if node_type == 'comment':
             return False, None
             
-        # Only check word length for identifiers or other nodes, skip string_literal
         if node_type != 'string_literal':
             max_word_len = max((len(w) for w in text.split()), default=0)
-            if max_word_len > 200:
+            # Increase threshold for Solidity bytecode and hex addresses
+            if max_word_len > 1000:
                 return True, f"Long_Continuous_String ({max_word_len})"
-            
-        # Symbol density check
+                
         special_chars = set("{}[]()=><$|\\\"'`~^")
         special_count = sum(1 for c in text if c in special_chars)
         special_ratio = special_count / len(text)
         
-        threshold = 0.5 if node_type == 'string_literal' else 0.4
+        # Relax symbol density thresholds
+        threshold = 0.7 if node_type == 'string_literal' else 0.6
         if special_ratio > threshold:
             return True, f"High_Special_Char_Ratio ({special_ratio:.2f})"
             
         non_ascii_count = sum(1 for c in text if ord(c) > 127)
-        if non_ascii_count > 5 and (non_ascii_count / len(text)) > 0.15:
+        if non_ascii_count > 5 and (non_ascii_count / len(text)) > 0.30:
             return True, "Abnormal_Non_ASCII_Ratio"
             
         return False, None
     
     def iterative_semantic_analysis(self, code, sem_guard, parser, language, max_iterations=2):
         current_code = code
-        all_features = []
         
         for iteration in range(max_iterations):
             inputs = sem_guard.tokenizer(
@@ -83,10 +151,18 @@ class PreFilter:
             for idx in high_loss_indices:
                 if idx + 1 < len(offsets):
                     start_off, end_off = offsets[idx + 1]
-                    code_bytes[start_off:end_off] = b" " * (end_off - start_off)
+                    length = end_off - start_off
                     
+                    # Replace with neutral variable to maintain AST integrity
+                    if length >= 5:
+                        replacement = b"VAR_D" + b"_" * (length - 5)
+                    else:
+                        replacement = b"V" + b"_" * (length - 1)
+                        
+                    code_bytes[start_off:end_off] = replacement
+            
+            # [FIX] Update current_code with the masked content for the next iteration
             current_code = code_bytes.decode("utf8", errors="ignore")
-            # print(f"[ITERATION {iteration}] Masked decoys. Analyzing remaining logic.")
             
         return current_code
 
@@ -155,33 +231,4 @@ class PreFilter:
 
         return triggered, repaired_code, debug_info
     
-    def prune_dead_decoys(self, tree, language, code_bytes):
-        """
-        Remove unused state variables (decoys) using AST static analysis.
-        """
-        query_state_vars = language.query("(state_variable_declaration (identifier) @var)")
-        query_assignments = language.query("(assignment_expression left: (identifier) @left right: (_) @right)")
-        
-        state_vars = {node.text.decode("utf8") for node, _ in query_state_vars.captures(tree.root_node)}
-        
-        active_spans = []
-        for node, _ in query_assignments.captures(tree.root_node):
-            var_name = node.text.decode("utf8")
-            if var_name in state_vars:
-                active_spans.append((node.start_byte, node.end_byte))
-                print(f"[PRUNING] Active state modification kept: {var_name}")
-                
-        # If no active spans are found, return original code to prevent returning empty string
-        if not active_spans:
-            return code_bytes.decode("utf8", errors="ignore")
-            
-        return self.extract_active_spans(code_bytes, active_spans)
-
-    def extract_active_spans(self, code_bytes, spans):
-        """
-        Reconstruct code keeping only the active byte spans.
-        """
-        result = bytearray(len(code_bytes))
-        for start, end in spans:
-            result[start:end] = code_bytes[start:end]
-        return result.decode("utf8", errors="ignore")
+    

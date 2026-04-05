@@ -9,8 +9,10 @@
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/contextual_attack.jsonl -n 200
     ----------------------------------- ITGen & Flashboom ------------------------------
     python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang solidity
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang solidity
     CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B --lang solidity
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang solidity 
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang java
 """
 import os
 import json
@@ -32,10 +34,7 @@ def clean_dataset_metadata(code_text):
     if not code_text:
         return ""
     
-    # Remove single line dataset annotations (e.g., // <yes> <report> ...)
     cleaned_code = re.sub(r'//\s*<(yes|no)>\s*<report>.*', '', code_text, flags=re.IGNORECASE)
-    
-    # Remove metadata block comments containing source URLs or articles
     cleaned_code = re.sub(r'/\*[\s\S]*?@(source|article|vulnerable_at_lines):[\s\S]*?\*/', '', cleaned_code)
     
     return cleaned_code
@@ -73,13 +72,13 @@ class DummyArgs:
         self.adversarial_threshold = 999.0
         self.th_string = 999.0
         self.l3_base_influence = 999.0
-        self.l3_surprise_tolerance = 0.10  # [修正] 對齊主程式預設的 0.10
+        self.l3_surprise_tolerance = 0.10
         self.batch_size = batch_size
 
-# 新增debug模式
 def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, args, debug=False):
     features = {
         "regex_triggered": False,
+        "decoy_detected": False,
         "adv_features": [],
         "sem_features": []
     }
@@ -92,9 +91,6 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     if debug:
         print("\n" + "-"*40)
         print(f"[DEBUG] Stage 1 - Triggered: {reg_detected}")
-        if reg_detected:
-            for info in debug_info:
-                print(f"  -> Reason: {info['type']} | Matched: {info['matched_text']}")
         
     if reg_detected:
         return features
@@ -102,28 +98,15 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     code_bytes = bytes(current_code, "utf8")
     try:
         tree = parser.parse(code_bytes)
-    except:
-        if debug: print("[DEBUG] Parser Error")
-        return features
-
-    # --- Flashboom Defense 1: Prune Dead Decoys ---
-    try:
-        pruned_code = pre_filter.prune_dead_decoys(tree, language, code_bytes) # Updated object call
-        if pruned_code and len(pruned_code.strip()) > 0:
-            current_code = pruned_code
-            code_bytes = bytes(current_code, "utf8")
-            tree = parser.parse(code_bytes)
-            if debug:
-                print("[DEBUG] Flashboom Defense: prune_dead_decoys applied.")
     except Exception as e:
-        if debug: print(f"[DEBUG] prune_dead_decoys failed: {e}")
+        if debug: 
+            print(f"[DEBUG] Parser Exception: {e}")    
+        return features
+    comment_node = "[(line_comment) (block_comment)]" if language.name == "java" else "(comment)"
 
-    # --- Stage 2: Adversarial Guardrail ---
-    query_adv = language.query("(comment) @comment (string_literal) @string (identifier) @identifier")
+    # Stage 2: Adversarial Guardrail
+    query_adv = language.query(f"{comment_node} @comment (string_literal) @string (identifier) @identifier")
     captures_adv = query_adv.captures(tree.root_node)
-    
-    if debug:
-        print(f"[DEBUG] Stage 2 - Adversarial Guardrail Candidates:")
         
     for node, type_name in captures_adv:
         text = node.text.decode("utf8", errors='ignore')
@@ -142,43 +125,36 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             "length_penalty": length_penalty,
             "whitelisted": whitelisted
         })
-        
-        if debug:
-            print(f"  -> Type: {type_name:<12} | Score: {score:.4f} | Penalty: {length_penalty:.4f} | Whitelisted: {whitelisted}")
 
-    # --- Flashboom Defense 2: Iterative Semantic Analysis ---
+    # Algorithm 3: NDASE Iterative Masking
     try:
-        if debug: print("[DEBUG] Flashboom Defense: Running iterative_semantic_analysis...")
         current_code = pre_filter.iterative_semantic_analysis(current_code, sem_guard, parser, language)
         code_bytes = bytes(current_code, "utf8")
         tree = parser.parse(code_bytes)
     except Exception as e:
         if debug: print(f"[DEBUG] iterative_semantic_analysis failed: {e}")
 
-    # --- Flashboom Defense 3: Isolated Function Analysis ---
+    # Isolated Function Analysis Integration
     try:
-        if debug: print("[DEBUG] Flashboom Defense: Running extract_features_isolated...")
         isolated_features = sem_guard.extract_features_isolated(code_bytes, parser, language, sem_guard)
-        if debug:
-            for iso in isolated_features:
+        for iso in isolated_features:
+            if debug:
                 print(f"  -> [ISOLATED] Function: {iso['func_name']} | Max Loss: {iso['max_loss']:.4f}")
+            features["sem_features"].append({
+                "type": "FUNC_ISOLATED",
+                "is_noisy": False,
+                "influence": iso['max_loss'], # [修正] 直接使用原始數值
+                "surprise": iso['max_loss'],  # [修正] 直接使用原始數值
+                "ssd_index": 999.0 
+            })
     except Exception as e:
         if debug: print(f"[DEBUG] extract_features_isolated failed: {e}")
 
-    # --- Stage 3: Semantic Guardrail ---
-    inputs = sem_guard.tokenizer(
-        current_code, 
-        return_tensors="pt", 
-        truncation=True, 
-        max_length=2048, 
-        return_offsets_mapping=True
-    )
+    # Stage 3: Semantic Guardrail
+    inputs = sem_guard.tokenizer(current_code, return_tensors="pt", truncation=True, max_length=2048, return_offsets_mapping=True)
     input_ids = inputs["input_ids"].to(sem_guard.device)
     offsets = inputs["offset_mapping"][0].cpu().numpy()
     ctx_losses = sem_guard.get_token_losses(input_ids)
-    
-    if debug:
-        print(f"[DEBUG] Stage 3 - Semantic Guardrail Tokenizer Length: {len(input_ids[0])}")
         
     query_sem = language.query("(identifier) @identifier (comment) @comment (string_literal) @string")
     captures_sem = query_sem.captures(tree.root_node)
@@ -201,7 +177,8 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             'text': text, 
             'is_noisy': is_noisy,
             'type': token_type,
-            'node_type': type_name
+            'node_type': type_name,
+            'ast_node': node
         })
 
     var_ctx_map = defaultdict(list)
@@ -219,34 +196,27 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
                 break 
 
     candidates = []
-    if debug:
-        print(f"[DEBUG] Stage 3 - Context Losses and Priors:")
-        
     for node_key, losses in var_ctx_map.items():
         max_ctx = np.max(losses)
         var_text = node_key[2]
-        
-        if debug:
-            print(f"  -> Candidate: {var_text[:30]:<30} | Max Context Loss: {max_ctx:.4f}")
             
         if max_ctx > 2.0: 
             prior = sem_guard.get_prior_loss(var_text)
             if prior is None: continue
+            
+            # Algorithm 2: SSD Index Calculation
+            ssd_idx = sem_guard.calculate_ssd_index(var_meta_map[node_key]['ast_node'], max_ctx, prior)
             surprise_score = max(0.0, max_ctx - prior)
+            
             candidates.append({
                 'var': var_text, 
                 'surprise': surprise_score, 
-                'meta': var_meta_map[node_key]
+                'meta': var_meta_map[node_key],
+                'ssd_index': ssd_idx
             })
-            
-            if debug:
-                print(f"     [+] Passed pre-filter | Prior: {prior:.4f} | Surprise: {surprise_score:.4f}")
 
     candidates.sort(key=lambda x: x['surprise'], reverse=True)
     top_candidates = candidates[:10]
-
-    if debug:
-        print(f"[DEBUG] Stage 3 - Final Influence Computation (Top Candidates):")
         
     for cand in top_candidates:
         meta = cand['meta']
@@ -258,30 +228,37 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
         local_end = meta['end'] - window_start
         
         try:
-            influence = sem_guard.calc_active_influence(
-                local_bytes, local_start, local_end, meta['node_type'], cand['var'][:2000] 
-            )
+            # Generate masked code using NDASE algorithm
+            masked_bytes = bytearray(local_bytes)
+            masked_bytes = pre_filter.length_preserving_mask(masked_bytes, local_start, local_end)
+            
+            orig_str = local_bytes.decode("utf8", errors="ignore")
+            masked_str = masked_bytes.decode("utf8", errors="ignore")
+            
+            orig_inputs = sem_guard.tokenizer(orig_str, return_tensors="pt").to(sem_guard.device)["input_ids"]
+            masked_inputs = sem_guard.tokenizer(masked_str, return_tensors="pt").to(sem_guard.device)["input_ids"]
+            
+            # Algorithm 3: Calculate KL Divergence
+            kl_shift = sem_guard.calculate_kl_divergence_shift(orig_inputs, masked_inputs)
+            
             features["sem_features"].append({
                 "type": meta['type'],
                 "is_noisy": meta['is_noisy'],
-                "influence": influence,
-                "surprise": cand['surprise']
+                "influence": kl_shift,
+                "surprise": cand['surprise'],
+                "ssd_index": cand['ssd_index']
             })
-            if debug:
-                print(f"  -> Target: {cand['var'][:30]:<30} | Type: {meta['type']:<10} | Noisy: {meta['is_noisy']} | Influence: {influence:.6f}")
+            if debug: print(f"  -> Target: {cand['var'][:30]:<30} | KL Shift: {kl_shift:.6f} | SSD: {cand['ssd_index']:.4f}")
         except Exception as e:
-            if debug:
-                print(f"  -> [ERROR] Failed on {cand['var'][:30]}: {str(e)}")
             pass
 
     return features
 
-# ================= 新增：將特徵向量化，對齊 V2 的加速效能 =================
 def prepare_vector_data(extracted_data):
-    """將結構化資料轉換為 NumPy 矩陣，大幅加速 Grid Search 評估"""
     n = len(extracted_data)
     labels = np.array([item["label"] for item in extracted_data], dtype=np.int32)
     regex_triggered = np.array([item.get("regex_triggered", False) for item in extracted_data], dtype=bool)
+    decoy_detected = np.array([item.get("decoy_detected", False) for item in extracted_data], dtype=bool)
 
     adv_comment_max = np.full(n, -999.0)
     adv_string_max = np.full(n, -999.0)
@@ -291,8 +268,6 @@ def prepare_vector_data(extracted_data):
         for f in item.get("adv_features", []):
             score = f["score"]
             if f["type"] == 'comment':
-                # 代數轉換：score > (th_adv + penalty) * (1.5 if whitelisted else 1.0)
-                # 等同於： (score / 1.5 if whitelisted else score) - penalty > th_adv
                 penalty = f.get("length_penalty", 0.0)
                 adj_score = (score / 1.5 if f.get("whitelisted", False) else score) - penalty
                 adv_comment_max[i] = max(adv_comment_max[i], adj_score)
@@ -301,26 +276,30 @@ def prepare_vector_data(extracted_data):
             elif f["type"] == 'identifier':
                 adv_id_max[i] = max(adv_id_max[i], score)
 
-    sem_sample_indices = []
-    sem_influences = []
-    sem_surprises = []
-    sem_factors = [] 
+    sem_sample_indices, sem_influences, sem_surprises, sem_factors, sem_ssds = [], [], [], [], []
 
     for i, item in enumerate(extracted_data):
         for f in item.get("sem_features", []):
             factor = 1.0
+            
+            # if f.get("ssd_index", 0.0) < 1.5 and f["type"] != "FUNC_ISOLATED":
+            #     continue
+                
             if f.get("is_noisy", False): factor *= 0.8
             if f["type"] in ('FUNC', 'MACRO'): factor *= 2.5
-            elif f["type"] in ('STRING', 'COMMENT'): factor *= 5.0 # 對齊 defense V1 的 5.0 懲罰
+            elif f["type"] == 'FUNC_ISOLATED': factor *= 0.5
+            elif f["type"] in ('STRING', 'COMMENT'): factor *= 5.0
             
             sem_sample_indices.append(i)
             sem_influences.append(f["influence"])
             sem_surprises.append(f["surprise"])
             sem_factors.append(factor)
+            sem_ssds.append(f.get("ssd_index", 1.0))
 
     return {
         "labels": labels,
         "regex_triggered": regex_triggered,
+        "decoy_detected": decoy_detected,
         "adv_comment_max": adv_comment_max,
         "adv_string_max": adv_string_max,
         "adv_id_max": adv_id_max,
@@ -328,25 +307,27 @@ def prepare_vector_data(extracted_data):
             "indices": np.array(sem_sample_indices, dtype=np.int32),
             "influence": np.array(sem_influences, dtype=np.float32),
             "surprise": np.array(sem_surprises, dtype=np.float32),
-            "factor": np.array(sem_factors, dtype=np.float32)
+            "factor": np.array(sem_factors, dtype=np.float32),
+            "ssd": np.array(sem_ssds, dtype=np.float32)
         }
     }
 
 def simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, tolerance=0.10):
-    """利用向量化數據直接進行全陣列評估，取代慢速的 Python For Loop"""
     n = len(v_data["labels"])
     is_detected = v_data["regex_triggered"].copy()
+    
+    # is_detected |= v_data["decoy_detected"]
 
-    # Stage II: Adversarial (矩陣比較)
     is_detected |= (v_data["adv_comment_max"] > th_adv)
     is_detected |= (v_data["adv_string_max"] > th_str)
     is_detected |= (v_data["adv_id_max"] > th_adv)
 
-    # Stage III: Semantic
     sem = v_data["sem"]
     if len(sem["indices"]) > 0:
-        dyn_thresholds = th_l3 * sem["factor"] * (1.0 + (sem["surprise"] * tolerance))
-        triggered_nodes = sem["influence"] > dyn_thresholds
+        detection_score = sem["influence"] / (sem["ssd"] + 1e-5)
+        dyn_thresholds = th_l3 * sem["factor"]
+        # Trigger if standard influence is high OR the ratio of influence to structure complexity is highly abnormal
+        triggered_nodes = (sem["influence"] > dyn_thresholds) | (detection_score > (th_l3 * 2.0))
         
         sem_triggered_counts = np.bincount(
             sem["indices"], 
@@ -355,7 +336,6 @@ def simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, tolerance=0.10):
         )
         is_detected |= (sem_triggered_counts > 0)
 
-    # Metric calculation
     y_true = v_data["labels"]
     tp = np.sum((is_detected == True) & (y_true == 1))
     fp = np.sum((is_detected == True) & (y_true == 0))
@@ -373,14 +353,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input_path", type=str, required=True, help="Path to JSONL dataset for calibration")
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
-    parser.add_argument("-n", "--num_samples", type=int, default=300, help="Number of samples to use (increased to prevent overfitting)")
+    parser.add_argument("-n", "--num_samples", type=int, default=300, help="Number of samples to use")
     parser.add_argument("-bs", "--batch_size", type=int, default=16)
-    parser.add_argument("--max_fpr", type=float, default=0.10, help="Maximum acceptable FPR (Stricter default)")
+    parser.add_argument("--max_fpr", type=float, default=0.15, help="Maximum acceptable FPR")
     parser.add_argument("--lang", type=str, default="c", help="Target language (c, solidity, etc.)")
-    parser.add_argument("--debug_limit", type=int, default=3)
+    parser.add_argument("--debug_limit", type=int, default=2)
     args_cmd = parser.parse_args()
 
-    # --- Initialization ---
     TARGET_LANGUAGE = setup_tree_sitter(args_cmd.lang)
     TS_PARSER = Parser()
     TS_PARSER.set_language(TARGET_LANGUAGE)
@@ -397,7 +376,6 @@ def main():
     adv_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
     sem_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
 
-    # --- Data Loading & Sampling ---
     benign_codes = []
     adv_codes = []
     with open(args_cmd.input_path, 'r', encoding='utf-8') as f:
@@ -438,16 +416,25 @@ def main():
         feat["label"] = 1
         extracted_data.append(feat)
 
-    # 將提取特徵轉為向量結構
     v_data = prepare_vector_data(extracted_data)
 
-    # --- Grid Search Optimization ---
+    y_true_array = v_data["labels"]
+    benign_mask = (y_true_array == 0)
+    stage1_fpr = np.sum(v_data["regex_triggered"][benign_mask]) / np.sum(benign_mask) if np.sum(benign_mask) > 0 else 0.0
+    print(f"\n[-] Stage 1 (Static) Base FPR: {stage1_fpr:.4f}")
+    if stage1_fpr > args_cmd.max_fpr:
+        print("[!] Warning: Stage 1 FPR exceeds target max FPR. Grid search cannot resolve this.")
+
     print(f"\n[-] Starting Grid Search (Target Max FPR: {args_cmd.max_fpr*100}%)...")
     
-    adv_th_space = np.arange(8.0, 20.0, 0.5)
-    str_th_space = np.arange(5.0, 20.0, 1.0)
-    l3_th_space = np.arange(0.001, 0.300, 0.002)
-    l3_tolerance_space = np.arange(0.0, 0.20, 0.02)
+    adv_th_space = np.arange(10.0, 40.0, 1.0)
+    str_th_space = np.arange(8.0, 30.0, 1.0)
+    l3_th_space = np.concatenate([
+        np.arange(0.001, 1.0, 0.1),
+        np.arange(1.0, 15.0, 0.5), # Finer steps for the critical detection zone
+        np.arange(15.0, 50.0, 5.0)
+    ])
+    l3_tolerance_space = np.arange(0.0, 1.0, 0.1)
 
     best_metrics = {"f1": -1.0, "fpr": 1.0, "score": -1.0}
     best_params = {}
@@ -461,19 +448,16 @@ def main():
     for th_adv in adv_th_space:
         for th_str in str_th_space:
             for th_l3 in l3_th_space:
-                for t_l3 in l3_tolerance_space: # [新增] 第四層迴圈
+                for t_l3 in l3_tolerance_space:
                     
-                    # [修改] 將最後一個參數換成 t_l3
                     f1, prec, rec, fpr, tp, fp = simulate_pipeline_vectorized(
                         v_data, th_adv, th_str, th_l3, t_l3 
                     )
                     
                     if fpr < fallback_metrics["fpr"] or (fpr == fallback_metrics["fpr"] and f1 > fallback_metrics["f1"]):
                         fallback_metrics = {"f1": f1, "prec": prec, "rec": rec, "fpr": fpr, "tp": tp, "fp": fp}
-                        # [修改] 紀錄 t_l3
                         fallback_params = {"th_adv": th_adv, "th_str": th_str, "th_l3": th_l3, "t_l3": t_l3}
 
-                    # 限制 FPR 並計算評分 (F1 - 0.2 * FPR)
                     if fpr <= args_cmd.max_fpr:
                         composite_score = f1 - (0.2 * fpr)
                         if composite_score > best_metrics["score"]:
@@ -484,7 +468,7 @@ def main():
     pbar.close()
 
     if not best_params:
-        print(f"\n[!] 警告: 無法找到 FPR <= {args_cmd.max_fpr*100}% 的組合。改為輸出 FPR 最低的最佳解。")
+        print(f"\n[!] Warning: Could not find combination with FPR <= {args_cmd.max_fpr*100}%. Falling back to lowest FPR.")
         best_params = fallback_params
         best_metrics = fallback_metrics
 

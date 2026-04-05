@@ -55,6 +55,54 @@ class PreFilter:
             return True, "Abnormal_Non_ASCII_Ratio"
             
         return False, None
+    
+    def _detect_dead_decoys(self, tree, code_bytes):
+        """
+        分析是否存在不具備活動沉澱點（Active Sinks）的誘餌函數。
+        """
+        # 定義敏感操作（沉澱點）
+        query_sinks = self.language.query("""
+            (call_expression) @call
+            (assignment_expression) @assign
+            (return_statement) @return
+            (emit_statement) @emit
+        """)
+
+        # Expand core function whitelist
+        safe_funcs = ["main", "constructor", "fallback", "receive", "balanceOf", "allowance", "owner"]
+        sinks = query_sinks.captures(tree.root_node)
+        
+        active_function_starts = set()
+        for sink_node, _ in sinks:
+            # 向上追蹤該操作所屬的函數
+            current = sink_node
+            while current is not None:
+                if current.type == 'function_definition' or current.type == 'method_declaration':
+                    active_function_starts.add(current.start_byte)
+                    break
+                current = current.parent
+                
+        # 查詢所有函數
+        query_funcs = self.language.query("(function_definition) @func")
+        funcs = query_funcs.captures(tree.root_node)
+        
+        decoys_found = []
+        for func_node, _ in funcs:
+            # 取得函數名稱（這裡假設是 identifier 節點）
+            func_name = ""
+            for child in func_node.children:
+                if child.type == "identifier":
+                    func_name = child.text.decode("utf8", errors="ignore")
+                    break
+            
+            # 排除核心函數，若該函數沒有任何活動沉澱點，則視為誘餌
+            if func_name not in safe_funcs and func_node.start_byte not in active_function_starts:
+                decoys_found.append({
+                    "name": func_name,
+                    "span": (func_node.start_byte, func_node.end_byte)
+                })
+                
+        return decoys_found
 
     def detect(self, code):
         """
@@ -108,6 +156,17 @@ class PreFilter:
                     "type": f"Anomaly_{anomaly_type}_{node_type}",
                     "matched_text": text[:50].replace('\n', ' '),
                     "span": (node.start_byte, node.end_byte)
+                })
+
+        decoys = self._detect_dead_decoys(tree, code_bytes)
+        if decoys:
+            triggered = True
+            for d in decoys:
+                debug_info.append({
+                    "layer": "Stage_I_AST",
+                    "type": "Flashboom_Decoy_Detected",
+                    "matched_text": f"Function: {d['name']}",
+                    "span": d['span']
                 })
 
         # 執行 Fail-fast 修復：從後往前替換，避免位移錯誤

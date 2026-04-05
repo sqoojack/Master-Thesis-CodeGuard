@@ -9,7 +9,7 @@
     ----------------------------------- ITGen & Flashboom ------------------------------
     python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang solidity
-    python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B --lang solidity
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang java
 """
 import os
 import json
@@ -277,7 +277,10 @@ def prepare_vector_data(extracted_data):
             factor = 1.0
             if f.get("is_noisy", False): factor *= 0.8
             if f["type"] in ('FUNC', 'MACRO'): factor *= 2.5
-            elif f["type"] in ('STRING', 'COMMENT'): factor *= 5.0 # 對齊 defense V1 的 5.0 懲罰
+            elif f["type"] == 'STRING':
+                factor *= 3.0  
+            elif f["type"] == 'COMMENT':
+                factor *= 4.0  
             
             sem_sample_indices.append(i)
             sem_influences.append(f["influence"])

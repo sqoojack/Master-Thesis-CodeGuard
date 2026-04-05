@@ -23,7 +23,7 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/main.py \
     --th_string 8.00 \
     -L3_b 0.137 \
     -L3_t 0.18 \
-    --model_id Salesforce/codegen-350M-multi \
+    --model_id google/gemma-4-E4B \
     -i Dataset/Flashboom/flashboom_dataset.jsonl \
     -o result/sanitized_data/flashboom/CodeGuard.jsonl
         
@@ -102,17 +102,26 @@ class NumpyEncoder(json.JSONEncoder):
         return super(NumpyEncoder, self).default(obj)
 
 # --- Tree-sitter Setup ---
-def setup_tree_sitter():
+def setup_tree_sitter(lang_name):
     ts_dir = "build"
-    repo_dir = os.path.join(ts_dir, "tree-sitter-c")
-    lib_path = os.path.join(ts_dir, "my-languages.so")
-    if not os.path.exists(ts_dir): os.makedirs(ts_dir)
+    repo_name = f"tree-sitter-{lang_name}"
+    repo_dir = os.path.join(ts_dir, repo_name)
+    lib_path = os.path.join(ts_dir, f"{lang_name}.so")
+
+    repo_url = f"https://github.com/tree-sitter/{repo_name}"
+
+    if not os.path.exists(ts_dir): 
+        os.makedirs(ts_dir)
+    
     if not os.path.exists(repo_dir):
-        os.system(f"git clone https://github.com/tree-sitter/tree-sitter-c {repo_dir}")
-        os.system(f"cd {repo_dir} && git checkout v0.21.3")
+        print(f"[-] Cloning {lang_name} parser...")
+        os.system(f"git clone {repo_url} {repo_dir}")
+        
     if not os.path.exists(lib_path): 
+        print(f"[-] Building {lang_name} library...")
         Language.build_library(lib_path, [repo_dir])
-    return Language(lib_path, 'c')
+
+    return Language(lib_path, lang_name)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -129,14 +138,15 @@ def main():
     # Semantic Guardrail Params (L3)
     parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.009, help="Base strict threshold for variables.")
     parser.add_argument("-L3_t", "--l3_surprise_tolerance", type=float, default=1.32)
+    parser.add_argument("--lang", type=str, default="c", help="Target language")
     
     args = parser.parse_args()
 
     # --- Initialization ---
     try:
-        C_LANGUAGE = setup_tree_sitter()
+        TARGET_LANGUAGE = setup_tree_sitter(args.lang)
         TS_PARSER = Parser()
-        TS_PARSER.set_language(C_LANGUAGE)
+        TS_PARSER.set_language(TARGET_LANGUAGE)
     except Exception as e:
         print(f"[!] Tree-sitter setup failed: {e}")
         return
@@ -158,9 +168,9 @@ def main():
     model.eval()
 
     # --- Instantiate Guardrails ---
-    pre_filter = PreFilter(TS_PARSER, C_LANGUAGE)
-    adversarial_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args)
-    semantic_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, C_LANGUAGE, args)
+    pre_filter = PreFilter(TS_PARSER, TARGET_LANGUAGE)
+    adversarial_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args)
+    semantic_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args)
 
     stats = {
         "TP": 0, "TN": 0, "FP": 0, "FN": 0, 
