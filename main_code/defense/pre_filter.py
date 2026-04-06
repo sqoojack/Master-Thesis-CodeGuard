@@ -1,9 +1,10 @@
 import re
 
 class PreFilter:
-    def __init__(self, parser, language):
+    def __init__(self, parser, language, lang_name="c"):
         self.parser = parser
         self.language = language
+        self.lang_name = lang_name.lower()
         
         # 1. 惡意特徵正則匹配 (專注於 Prompt Injection, XSS, 系統/路徑注入)
         self.string_patterns = {
@@ -21,11 +22,16 @@ class PreFilter:
             )
         }
         
-        # 2. 節點查詢：必須包含 ERROR 節點，以捕捉破壞語法的注入攻擊
+        # Shared queries (Same for Java, C, and Solidity)
         self.string_query = self.language.query("(string_literal) @string")
-        self.comment_query = self.language.query("(comment) @comment")
         self.identifier_query = self.language.query("(identifier) @identifier")
         self.error_query = self.language.query("(ERROR) @error")
+
+        # Language-specific query for comments
+        if self.lang_name == "java":
+            self.comment_query = self.language.query("(line_comment) @comment (block_comment) @comment")
+        else:
+            self.comment_query = self.language.query("(comment) @comment")
 
     def _check_structural_anomaly(self, text, node_type):
         if len(text) < 15:
@@ -57,46 +63,66 @@ class PreFilter:
         return False, None
     
     def _detect_dead_decoys(self, tree, code_bytes):
-        """
-        分析是否存在不具備活動沉澱點（Active Sinks）的誘餌函數。
-        """
-        # 定義敏感操作（沉澱點）
-        query_sinks = self.language.query("""
-            (call_expression) @call
-            (assignment_expression) @assign
-            (return_statement) @return
-            (emit_statement) @emit
-        """)
+        # 1. Adapt queries for different languages
+        try:
+            if self.lang_name == "java":
+                query_sinks = self.language.query("""
+                    (method_invocation) @call
+                    (assignment_expression) @assign
+                    (return_statement) @return
+                """)
+            if self.lang_name == "solidity":
+                query_sinks = self.language.query("(function_call) @call")
+            else:
+                query_sinks = self.language.query("""
+                    (call_expression) @call
+                    (assignment_expression) @assign
+                    (return_statement) @return
+                """)
+        except Exception:
+            try:
+                if self.lang_name == "java":
+                    query_sinks = self.language.query("(method_invocation) @call")
+                else:
+                    query_sinks = self.language.query("(call_expression) @call")
+            except Exception:
+                return []
 
-        # Expand core function whitelist
+        # 2. Expand core function whitelist
         safe_funcs = ["main", "constructor", "fallback", "receive", "balanceOf", "allowance", "owner"]
         sinks = query_sinks.captures(tree.root_node)
         
         active_function_starts = set()
         for sink_node, _ in sinks:
-            # 向上追蹤該操作所屬的函數
             current = sink_node
             while current is not None:
-                if current.type == 'function_definition' or current.type == 'method_declaration':
+                if current.type in ('function_definition', 'method_declaration'):
                     active_function_starts.add(current.start_byte)
                     break
                 current = current.parent
                 
-        # 查詢所有函數
-        query_funcs = self.language.query("(function_definition) @func")
+        # 3. Dynamic query for function nodes
+        try:
+            query_funcs = self.language.query("(function_definition) @func")
+        except Exception:
+            try:
+                query_funcs = self.language.query("(method_declaration) @func")
+            except Exception:
+                return []
+        
         funcs = query_funcs.captures(tree.root_node)
         
         decoys_found = []
         for func_node, _ in funcs:
-            # 取得函數名稱（這裡假設是 identifier 節點）
             func_name = ""
             for child in func_node.children:
                 if child.type == "identifier":
                     func_name = child.text.decode("utf8", errors="ignore")
                     break
+                if child.type == "name" or child.type == "variable_declarator":
+                    func_name = child.text.decode("utf8", errors="ignore")
             
-            # 排除核心函數，若該函數沒有任何活動沉澱點，則視為誘餌
-            if func_name not in safe_funcs and func_node.start_byte not in active_function_starts:
+            if func_name and func_name not in safe_funcs and func_node.start_byte not in active_function_starts:
                 decoys_found.append({
                     "name": func_name,
                     "span": (func_node.start_byte, func_node.end_byte)

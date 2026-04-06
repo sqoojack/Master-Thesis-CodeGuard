@@ -8,6 +8,7 @@ class AdversarialGuardrail:
         self.device = device
         self.parser = parser
         self.language = language
+        self.lang_name = getattr(args, 'lang', 'c').lower()
         
         self.adversarial_threshold = args.adversarial_threshold
         self.th_string = args.th_string
@@ -60,7 +61,10 @@ class AdversarialGuardrail:
         except:
             return False, code, []
 
-        query = self.language.query("(comment) @comment (string_literal) @string (identifier) @identifier")
+        comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
+        query_str = f"{comment_node} (string_literal) @string (identifier) @identifier"
+
+        query = self.language.query(query_str)
         captures = query.captures(tree.root_node)
         
         replacements = [] 

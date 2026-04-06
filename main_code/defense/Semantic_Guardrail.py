@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-import re
 from collections import defaultdict
 
 class SemanticGuardrail:
@@ -10,10 +9,21 @@ class SemanticGuardrail:
         self.device = device
         self.parser = parser
         self.language = language
+        self.lang_name = getattr(args, 'lang', 'c').lower()
         
-        # 參數
-        self.base_influence_th = args.l3_base_influence
-        self.surprise_tolerance = args.l3_surprise_tolerance
+        self.base_influence_th = getattr(args, 'l3_base_influence', 0.025)
+        self.surprise_tolerance = getattr(args, 'l3_surprise_tolerance', 0.10)
+        
+        # Centralized parameters for both detection and dynamic threshold search
+        self.max_ctx_threshold = 2.0
+        self.top_k_candidates = 20
+        self.prefix_window = 1500
+        self.suffix_window = 300
+        
+        self.factor_noisy = 0.8
+        self.factor_func_macro = 2.0
+        self.factor_string = 3.0
+        self.factor_comment = 4.0
         
         self.whitelist = {
             'int', 'char', 'void', 'float', 'double', 'long', 'short', 'unsigned', 'signed',
@@ -49,12 +59,10 @@ class SemanticGuardrail:
 
     def calc_active_influence(self, code_bytes, start_byte, end_byte, node_type, target_text):
         prefix = code_bytes[:start_byte].decode("utf8", errors="ignore")
-        
-        # Use local window to prevent loss dilution from extreme long prefix
-        local_prefix = prefix[-500:] if len(prefix) > 500 else prefix
+        local_prefix = prefix[-self.prefix_window:] if len(prefix) > self.prefix_window else prefix
         
         suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
-        eval_suffix = suffix[:256] 
+        eval_suffix = suffix[:self.suffix_window] 
         if len(eval_suffix) < 10: return 0.0
         
         text_orig = local_prefix + target_text + eval_suffix
@@ -78,47 +86,53 @@ class SemanticGuardrail:
         if text.endswith(self.noise_suffixes): return True
         return False
 
-    def get_token_type(self, code, node, text):
-        if text.isupper(): return 'MACRO'
+    def get_token_type(self, code_bytes, node, text):
+        if text.isupper(): return 'MACRO' 
         end_byte = node.end_byte
-        next_chars = code[end_byte:end_byte+10].strip()
-        if next_chars.startswith('('): return 'FUNC'
+        next_bytes = code_bytes[end_byte:end_byte+10].strip()
+        if next_bytes.startswith(b'('): 
+            return 'FUNC'
         return 'NORMAL'
 
-    def detect(self, code):
-        """
-        執行 Layer 3 Active Verify
-        Returns: is_attack (bool), repaired_code (str), debug_info (list)
-        """
-        if not code: return False, code, []
-        code_bytes = bytes(code, "utf8")
+    def get_dynamic_factor(self, token_type, is_noisy):
+        factor = 1.0
+        if is_noisy: factor *= self.factor_noisy
+        if token_type in ('FUNC', 'MACRO'): factor *= self.factor_func_macro
+        elif token_type == 'STRING': factor *= self.factor_string
+        elif token_type == 'COMMENT': factor *= self.factor_comment
+        return factor
 
-        inputs = self.tokenizer(code, return_tensors="pt", truncation=True, max_length=1024, return_offsets_mapping=True)
+    def _get_top_candidates(self, code):
+        """Core logic to parse AST, calculate loss, and filter top candidates."""
+        if not code: return b"", []
+        
+        code_bytes = bytes(code, "utf8")
+        max_len = min(self.tokenizer.model_max_length, 2048)
+        inputs = self.tokenizer(code, return_tensors="pt", truncation=True, max_length=max_len, return_offsets_mapping=True)
         input_ids = inputs["input_ids"].to(self.device)
         offsets = inputs["offset_mapping"][0].cpu().numpy()
         ctx_losses = self.get_token_losses(input_ids)
 
         try:
             tree = self.parser.parse(code_bytes)
-            query = self.language.query("(identifier) @identifier (comment) @comment (string_literal) @string")
+            comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
+            query_str = f"(identifier) @identifier {comment_node} (string_literal) @string"
+            query = self.language.query(query_str)
             captures = query.captures(tree.root_node)
-        except:
-            return False, code, []
+        except Exception:
+            return code_bytes, []
 
         var_ranges = []
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
-            
-            # 分類處理：只有 identifier 需要套用 whitelist 和特殊類型判斷
             if type_name == 'identifier':
                 if len(text) < 4 or text in self.whitelist: continue
                 is_noisy = self.is_noisy_variable(text)
-                token_type = self.get_token_type(code, node, text)
+                token_type = self.get_token_type(code_bytes, node, text)
             else:
-                # 註解與字串若太短則略過
                 if len(text) < 10: continue
                 is_noisy = False
-                token_type = type_name.upper() # 'COMMENT' 或 'STRING'
+                token_type = type_name.upper()
             
             var_ranges.append({
                 'start': node.start_byte, 
@@ -129,42 +143,73 @@ class SemanticGuardrail:
                 'node_type': type_name
             })
 
+        last_byte_covered = offsets[-1][1]
+        valid_var_ranges = [v for v in var_ranges if v['end'] <= last_byte_covered]
+
         var_ctx_map = defaultdict(list)
         var_meta_map = {} 
-        
         for i, loss in enumerate(ctx_losses):
             token_idx = i + 1
             if token_idx >= len(offsets): break
             start_off, end_off = offsets[token_idx]
-            for v_info in var_ranges:
+            for v_info in valid_var_ranges:
                 if start_off >= v_info['start'] and end_off <= v_info['end']:
-                    # 使用唯一的 key (包含座標)，防止相同內容的註解或變數被合併計算
                     node_key = (v_info['start'], v_info['end'], v_info['text'])
                     var_ctx_map[node_key].append(loss)
                     var_meta_map[node_key] = v_info
-                    break 
+                    break
 
         candidates = []
         for node_key, losses in var_ctx_map.items():
             max_ctx = np.max(losses)
-            if max_ctx > 4.0: 
-                var_text = node_key[2] # 取得文字內容
+            if max_ctx > self.max_ctx_threshold: 
+                var_text = node_key[2]
                 prior = self.get_prior_loss(var_text)
                 if prior is None: continue
                 surprise_score = max(0.0, max_ctx - prior)
                 candidates.append({
                     'var': var_text, 
-                    'surprise_score': surprise_score, 
+                    'surprise_score': float(surprise_score), 
                     'meta': var_meta_map[node_key]
                 })
 
-        if not candidates: 
+        candidates.sort(key=lambda x: x['surprise_score'], reverse=True)
+        top_candidates = candidates[:self.top_k_candidates]
+        
+        return code_bytes, top_candidates
+
+    def extract_semantic_features(self, code):
+        """Extract features used for dynamic threshold tuning."""
+        code_bytes, top_candidates = self._get_top_candidates(code)
+        features = []
+        
+        for cand in top_candidates:
+            var = cand['var']
+            meta = cand['meta']
+            try:
+                influence = self.calc_active_influence(code_bytes, meta['start'], meta['end'], meta['node_type'], var)
+                factor = self.get_dynamic_factor(meta['type'], meta['is_noisy'])
+                features.append({
+                    "var_name": var,
+                    "type": meta['type'],
+                    "is_noisy": meta['is_noisy'],
+                    "influence": float(influence),
+                    "surprise": cand['surprise_score'],
+                    "factor": float(factor)
+                })
+            except Exception:
+                pass
+        return features
+
+    def detect(self, code):
+        """Execute Layer 3 Active Verify with centralized parameters."""
+        if not code: return False, code, []
+        
+        code_bytes, top_candidates = self._get_top_candidates(code)
+        if not top_candidates:
             return False, code, []
 
-        candidates.sort(key=lambda x: x['surprise_score'], reverse=True)
-        top_candidates = candidates[:20]
-        
-        toxic_nodes = [] # 修正：這裡要與下方一致
+        toxic_nodes = []
         is_attack = False
         debug_info = []
 
@@ -173,17 +218,11 @@ class SemanticGuardrail:
             surprise = cand['surprise_score']
             meta = cand['meta']
             
-            # 使用 AST 精準座標進行影響力計算
             influence = self.calc_active_influence(code_bytes, meta['start'], meta['end'], meta['node_type'], var)
+            factor = self.get_dynamic_factor(meta['type'], meta['is_noisy'])
             
-            dynamic_threshold = self.base_influence_th * (1.0 + (surprise * self.surprise_tolerance))
-            if meta['is_noisy']: dynamic_threshold *= 0.8
-            if meta['type'] in ('FUNC', 'MACRO'): 
-                dynamic_threshold *= 1.2
-            if meta['type'] == 'STRING':
-                dynamic_threshold *= 3.0  # Reduced from 5.0
-            elif meta['type'] == 'COMMENT':
-                dynamic_threshold *= 4.0  # Reduced from 5.0
+            min_threshold = self.base_influence_th * 0.1
+            dynamic_threshold = max(min_threshold, (self.base_influence_th * factor) / (1.0 + (surprise * self.surprise_tolerance)))
             
             triggered = False
             if influence > dynamic_threshold:
@@ -192,7 +231,7 @@ class SemanticGuardrail:
                 is_attack = True
             
             debug_info.append({
-                "var": var[:50].replace('\n', ' '), # 截斷顯示避免 log 過長
+                "var": var[:50].replace('\n', ' '), 
                 "surprise": surprise,
                 "influence": influence,
                 "threshold": dynamic_threshold,
@@ -203,7 +242,6 @@ class SemanticGuardrail:
 
         repaired_code = code
         if is_attack:
-            # 重要：由後往前替換，避免位移導致座標失效
             toxic_nodes.sort(key=lambda x: x['start'], reverse=True)
             new_code_bytes = bytearray(code_bytes)
             for idx, meta in enumerate(toxic_nodes):
