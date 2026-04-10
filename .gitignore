@@ -39,4 +39,4 @@ main_code/attack/XOXO_Attack/
 *.pkl
 *.npy
 *.bin
-build/
+build/.env

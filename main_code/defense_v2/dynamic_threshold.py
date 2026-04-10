@@ -1,7 +1,9 @@
 """
+    ----------------------------------- ShadowCode ------------------------------
+    python main_code/defense/dynamic_threshold.py -i Dataset/ShadowCode/shadowcode_dataset.jsonl -n 200
     ----------------------------------- Merged_dataset ------------------------------
-    python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200
-    python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense_v2/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 600
+    python main_code/defense_v2/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B
     ----------------------------------- Adaptive Attack ------------------------------
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/decoys_attack.jsonl -n 200
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl -n 200
@@ -75,6 +77,19 @@ def setup_tree_sitter(lang_name):
 
     return Language(lib_path, lang_name)
 
+def detect_language_heuristic(entry, code, default_lang="c"):
+    lang = entry.get("language", entry.get("lang", "")).lower()
+    if lang in ["c", "java", "solidity"]:
+        return lang
+    
+    code_lower = code.lower() if code else ""
+    if "pragma solidity" in code_lower or "contract " in code_lower:
+        return "solidity"
+    elif "public class " in code_lower or "import java." in code_lower or "system.out.print" in code_lower:
+        return "java"
+        
+    return default_lang if default_lang in ["c", "java", "solidity"] else "c"
+
 class DummyArgs:
     def __init__(self, batch_size, lang="c"):
         self.adversarial_threshold = 999.0
@@ -125,7 +140,6 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
         if debug: print("[DEBUG] Parser error")
         return features
 
-    # Extract Stage 1 features without early exit
     nodes_to_scan = []
     for query in [pre_filter.string_query, pre_filter.comment_query, pre_filter.identifier_query, pre_filter.error_query]:
         for node, _ in query.captures(tree.root_node):
@@ -174,7 +188,6 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     features["s1_spec_other"] = max_spec_other
     features["s1_non_ascii"] = max_non_ascii
 
-    # Extract Stage 2 features
     lang_name = getattr(pre_filter, 'lang_name', 'c')
     comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
     query_adv_str = f"{comment_node} (string_literal) @string (identifier) @identifier"
@@ -186,7 +199,7 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
         if len(text) < 10: 
             continue
         
-        score = adv_guard.calc_mink_score(text[:3000], k=0.5)
+        score = adv_guard.calc_mink_plus_plus_score(text[:3000], k=0.5)
         whitelisted = adv_guard.is_whitelisted(text)
         
         length_penalty = 0.0
@@ -201,7 +214,6 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             "whitelisted": whitelisted
         })
 
-    # Extract Stage 3 features
     features["sem_features"] = sem_guard.extract_semantic_features(code)
 
     return features
@@ -319,13 +331,10 @@ def main():
     parser.add_argument("-bs", "--batch_size", type=int, default=16)
     parser.add_argument("--max_fpr", type=float, default=0.10, help="Max FPR limit")
     parser.add_argument("--beta", type=float, default=1.5, help="F-beta weight")
-    parser.add_argument("--lang", type=str, default="c", help="Target lang")
+    parser.add_argument("--lang", type=str, default="c", help="Default target lang")
     parser.add_argument("--debug_limit", type=int, default=3)
     args_cmd = parser.parse_args()
 
-    TARGET_LANGUAGE = setup_tree_sitter(args_cmd.lang)
-    TS_PARSER = Parser()
-    TS_PARSER.set_language(TARGET_LANGUAGE)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     print(f"[-] Load model: {args_cmd.model_id}...")
@@ -334,38 +343,72 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args_cmd.model_id, torch_dtype=torch.float16).to(device)
     model.eval()
 
-    args_dummy = DummyArgs(args_cmd.batch_size, args_cmd.lang)
-    pre_filter = PreFilter(TS_PARSER, TARGET_LANGUAGE, lang_name=args_cmd.lang)
-    adv_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
-    sem_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
+    supported_langs = ["c", "java", "solidity"]
+    pipelines = {}
+    
+    print("[-] Setup Tree-sitter and Guardrails for multiple languages...")
+    for lang in supported_langs:
+        try:
+            target_lang = setup_tree_sitter(lang)
+            ts_parser = Parser()
+            ts_parser.set_language(target_lang)
+            dummy_args = DummyArgs(args_cmd.batch_size, lang)
+            
+            pipelines[lang] = {
+                "parser": ts_parser,
+                "language": target_lang,
+                "pre_filter": PreFilter(ts_parser, target_lang, lang_name=lang),
+                "adv_guard": AdversarialGuardrail(model, tokenizer, device, ts_parser, target_lang, dummy_args),
+                "sem_guard": SemanticGuardrail(model, tokenizer, device, ts_parser, target_lang, dummy_args)
+            }
+        except Exception as e:
+            print(f"[!] Setup failed for {lang}: {e}")
 
-    benign_codes, adv_codes = [], []
+    if not pipelines:
+        print("[!] No parsers loaded. Exiting.")
+        return
+
+    benign_samples, adv_samples = [], []
     with open(args_cmd.input_path, 'r', encoding='utf-8') as f:
         for line in f:
             if not line.strip(): continue
             try:
                 entry = json.loads(line)
                 if "code" in entry and entry["code"]:
-                    benign_codes.append(clean_dataset_metadata(entry["code"]))
+                    benign_samples.append({"code": clean_dataset_metadata(entry["code"]), "entry": entry})
                 if "adv_code" in entry and entry["adv_code"]:
-                    adv_codes.append(clean_dataset_metadata(entry["adv_code"]))
+                    adv_samples.append({"code": clean_dataset_metadata(entry["adv_code"]), "entry": entry})
             except: pass
             
-    num_per_class = min(args_cmd.num_samples // 2, len(benign_codes), len(adv_codes))
+    num_per_class = min(args_cmd.num_samples // 2, len(benign_samples), len(adv_samples))
     np.random.seed(42)
-    selected_benign = np.random.choice(benign_codes, num_per_class, replace=False)
-    selected_adv = np.random.choice(adv_codes, num_per_class, replace=False)
+    
+    idx_benign = np.random.choice(len(benign_samples), num_per_class, replace=False)
+    selected_benign = [benign_samples[i] for i in idx_benign]
+    
+    idx_adv = np.random.choice(len(adv_samples), num_per_class, replace=False)
+    selected_adv = [adv_samples[i] for i in idx_adv]
 
     print(f"[-] Start extraction on {num_per_class*2} samples...")
     extracted_data = []
     
-    for i, code in enumerate(tqdm(selected_benign, desc="Benign extract")):
-        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, TARGET_LANGUAGE, args_dummy, debug=(i < args_cmd.debug_limit))
+    for i, item in enumerate(tqdm(selected_benign, ncols=90, desc="Benign extract")):
+        code = item["code"]
+        lang = detect_language_heuristic(item["entry"], code, args_cmd.lang)
+        if lang not in pipelines: lang = list(pipelines.keys())[0]
+        p = pipelines[lang]
+        
+        feat = extract_features(code, p["pre_filter"], p["adv_guard"], p["sem_guard"], p["parser"], p["language"], None, debug=(i < args_cmd.debug_limit))
         feat["label"] = 0
         extracted_data.append(feat)
         
-    for i, code in enumerate(tqdm(selected_adv, desc="Adv extract")):
-        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, TARGET_LANGUAGE, args_dummy, debug=(i < args_cmd.debug_limit))
+    for i, item in enumerate(tqdm(selected_adv, ncols=90, desc="Adv extract")):
+        code = item["code"]
+        lang = detect_language_heuristic(item["entry"], code, args_cmd.lang)
+        if lang not in pipelines: lang = list(pipelines.keys())[0]
+        p = pipelines[lang]
+        
+        feat = extract_features(code, p["pre_filter"], p["adv_guard"], p["sem_guard"], p["parser"], p["language"], None, debug=(i < args_cmd.debug_limit))
         feat["label"] = 1
         extracted_data.append(feat)
 
@@ -378,8 +421,8 @@ def main():
     s1_o_space = [0.1, 0.3, 0.7]
     s1_a_space = [0.05, 0.40, 0.60, 0.80]
     
-    adv_th_space = np.arange(8.0, 30.0, 2.0)
-    str_th_space = np.arange(8.0, 30.0, 2.0)
+    adv_th_space = np.arange(-5.0, 3.0, 0.2) 
+    str_th_space = np.arange(-5.0, 4.0, 0.5)
     l3_th_space = np.arange(0.010, 0.300, 0.05)
     l3_tolerance_space = [0.10, 0.20]
 
@@ -433,8 +476,10 @@ def main():
     print(f"  Spec Ratio (Str): {best_params['th_s1_s']:.2f}, Spec Ratio (Other): {best_params['th_s1_o']:.2f}")
     print(f"  Non-ASCII Ratio: {best_params['th_s1_a']:.2f}")
     print(f"\nBest Params (Stage 2 & 3):")
-    print(f"  Adv TH: {best_params['th_adv']:.2f}, String TH: {best_params['th_str']:.2f}")
-    print(f"  L3 Base: {best_params['th_l3']:.3f}, L3 Tol: {best_params['t_l3']:.2f}")
+    print(f"  Adv threshold: {best_params['th_adv']:.6f}")
+    print(f"  String Threshold: {best_params['th_str']:.4f}")
+    print(f"  L3 Base: {best_params['th_l3']:.3f}")
+    print(f"  L3 Tol: {best_params['t_l3']:.2f}")
     print(f"\nValidation Performance:\n  Score (Obj): {best_score:.4f}\n  F1-Score: {f1:.4f}\n  Precision: {prec:.4f}\n  Recall: {rec:.4f}\n  FPR: {best_metrics['fpr']:.4f} ({fp} FP)")
     print(f"\nLayer Breakdown:\n  Stage 1 (Regex+Anomaly): TP={best_metrics['s1_tp']}, FP={best_metrics['s1_fp']}")
     print(f"  Stage 2 (Adv):           TP={best_metrics['s2_tp']}, FP={best_metrics['s2_fp']}")

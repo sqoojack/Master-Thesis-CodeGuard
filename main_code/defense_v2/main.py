@@ -9,10 +9,19 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     -o result/sanitized_data/CodeGuard_sanitized_XOXO_0.02_0.05.jsonl
     
 ShadowCode:
+CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/main.py \
+    -A -2 \
+    --th_string -5 \
+    -L3_b 0.16 \
+    -L3_t 0.1 \
+    -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
+    -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
+    
 CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
-    -A 9 \
-    -L3_b 100.020 \
-    -L3_t 100.05 \
+    -A 10 \
+    --th_string 8 \
+    -L3_b 0.16 \
+    -L3_t 0.1 \
     -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
     -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
     
@@ -39,10 +48,10 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     --lang java
     
 Merged:
-CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
-    -A 12.8 \
-    --th_string 15.0 \
-    -L3_b 0.030 \
+CUDA_VISIBLE_DEVICES=0 python main_code/defense_v2/main.py \
+    -A -2.2 \
+    --th_string -2.5 \
+    -L3_b 0.210 \
     -L3_t 0.10 \
     -i Dataset/merged_all/tiny_merged_dataset.jsonl \
     -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
@@ -90,6 +99,7 @@ import re
 import json
 import argparse
 import torch
+import copy
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tree_sitter import Language, Parser
@@ -102,7 +112,7 @@ from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
 
 class NumpyEncoder(json.JSONEncoder):
-    """Convert numpy data types to Python native types for JSON serialization."""
+    """Convert numpy types to native python types for JSON serialization."""
     def default(self, obj):
         if isinstance(obj, np.floating):
             return float(obj)
@@ -113,7 +123,7 @@ class NumpyEncoder(json.JSONEncoder):
         return super(NumpyEncoder, self).default(obj)
 
 def clean_dataset_metadata(code_text):
-    """Clean specific metadata tags from dataset."""
+    """Clean metadata tags from dataset."""
     if not code_text:
         return ""
     
@@ -123,7 +133,7 @@ def clean_dataset_metadata(code_text):
     return cleaned_code
 
 def setup_tree_sitter(lang_name):
-    """Setup and return the Tree-sitter Language object with Solidity ABI fallback."""
+    """Setup and return Tree-sitter Language object."""
     ts_dir = "build"
     repo_name = f"tree-sitter-{lang_name}"
     repo_dir = os.path.join(ts_dir, repo_name)
@@ -156,6 +166,20 @@ def setup_tree_sitter(lang_name):
 
     return Language(lib_path, lang_name)
 
+def detect_language_heuristic(entry, code, default_lang="c"):
+    """Infer language from metadata or code heuristics."""
+    lang = entry.get("language", entry.get("lang", "")).lower()
+    if lang in ["c", "java", "solidity"]:
+        return lang
+    
+    code_lower = code.lower() if code else ""
+    if "pragma solidity" in code_lower or "contract " in code_lower:
+        return "solidity"
+    elif "public class " in code_lower or "import java." in code_lower or "system.out.print" in code_lower:
+        return "java"
+        
+    return default_lang if default_lang in ["c", "java", "solidity"] else "c"
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input_path", type=str, default="Dataset/XOXO_attack/XOXO_defect_detection_codebert.jsonl")
@@ -169,18 +193,10 @@ def main():
     
     parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.025)
     parser.add_argument("-L3_t", "--l3_surprise_tolerance", type=float, default=0.10)
-    parser.add_argument("--lang", type=str, default="c", help="Target language (c, java, solidity)")
+    parser.add_argument("--lang", type=str, default="c", help="Default target language (c, java, solidity)")
     
     args = parser.parse_args()
 
-    try:
-        TARGET_LANGUAGE = setup_tree_sitter(args.lang)
-        TS_PARSER = Parser()
-        TS_PARSER.set_language(TARGET_LANGUAGE)
-    except Exception as e:
-        print(f"[!] Tree-sitter setup failed: {e}")
-        return
-    
     attack_type = "Unknown"
     if "merged_all" in args.input_path: attack_type = "Merged_All"
     elif "ShadowCode" in args.input_path: attack_type = "ShadowCode"
@@ -200,9 +216,34 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype=torch.float16).to(device)
     model.eval()
 
-    pre_filter = PreFilter(TS_PARSER, TARGET_LANGUAGE, lang_name=args.lang)
-    adversarial_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args)
-    semantic_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args)
+    supported_langs = ["c", "java", "solidity"]
+    pipelines = {}
+
+    print("[-] Setup Tree-sitter and Guardrails for multiple languages...")
+    for lang in supported_langs:
+        try:
+            target_lang = setup_tree_sitter(lang)
+            ts_parser = Parser()
+            ts_parser.set_language(target_lang)
+            
+            lang_args = copy.deepcopy(args)
+            lang_args.lang = lang
+            
+            pre_filter = PreFilter(ts_parser, target_lang, lang_name=lang)
+            adversarial_guard = AdversarialGuardrail(model, tokenizer, device, ts_parser, target_lang, lang_args)
+            semantic_guard = SemanticGuardrail(model, tokenizer, device, ts_parser, target_lang, lang_args)
+            
+            pipelines[lang] = {
+                "pre_filter": pre_filter,
+                "adv_guard": adversarial_guard,
+                "sem_guard": semantic_guard
+            }
+        except Exception as e:
+            print(f"[!] Tree-sitter setup failed for {lang}: {e}")
+
+    if not pipelines:
+        print("[!] No parsers loaded successfully. Exiting.")
+        return
 
     stats = {
         "TP": 0, "TN": 0, "FP": 0, "FN": 0, 
@@ -243,7 +284,17 @@ def main():
             except: 
                 continue
 
-            def run_defense_pipeline(code_snippet):
+            benign_code = entry.get("code") or ""
+            benign_code = clean_dataset_metadata(benign_code)
+            
+            adv_code = entry.get("adv_code") or ""
+            adv_code = clean_dataset_metadata(adv_code)
+
+            entry_lang = detect_language_heuristic(entry, benign_code if benign_code else adv_code, args.lang)
+            if entry_lang not in pipelines:
+                entry_lang = list(pipelines.keys())[0]
+
+            def run_defense_pipeline(code_snippet, lang_key):
                 code_to_check = code_snippet if code_snippet else ""
                 
                 res = {
@@ -253,7 +304,12 @@ def main():
                     "final_code": code_to_check
                 }
 
-                reg_detected, stage1_code, reg_debug = pre_filter.detect(code_to_check)
+                pipeline = pipelines[lang_key]
+                p_filter = pipeline["pre_filter"]
+                a_guard = pipeline["adv_guard"]
+                s_guard = pipeline["sem_guard"]
+
+                reg_detected, stage1_code, reg_debug = p_filter.detect(code_to_check)
                 res["reg_debug"] = reg_debug
                 res["final_code"] = stage1_code
                 
@@ -262,7 +318,7 @@ def main():
                     res["Regex_Indep"] = True
                     return res 
 
-                adv_detected, stage2_code, adv_debug = adversarial_guard.detect(stage1_code)
+                adv_detected, stage2_code, adv_debug = a_guard.detect(stage1_code)
                 res["adv_debug"] = adv_debug
                 res["final_code"] = stage2_code
                 
@@ -271,7 +327,7 @@ def main():
                     res["Adversarial_Indep"] = True
                     return res 
 
-                sem_detected, final_code, sem_debug = semantic_guard.detect(stage2_code)
+                sem_detected, final_code, sem_debug = s_guard.detect(stage2_code)
                 res["sem_debug"] = sem_debug
                 res["final_code"] = final_code
                 
@@ -282,9 +338,7 @@ def main():
                 return res
 
             stats["Total_Benign"] += 1
-            benign_code = entry.get("code") or ""
-            benign_code = clean_dataset_metadata(benign_code)
-            res = run_defense_pipeline(benign_code)
+            res = run_defense_pipeline(benign_code, entry_lang)
             raw_scores_list.append({"label": 0, "score": get_pred_score(res)})
             
             if res["Regex"]: stats["L1_FP"] += 1
@@ -303,9 +357,7 @@ def main():
             if res["Semantic_Indep"]: stats["FP_Semantic"] += 1
 
             stats["Total_Adv"] += 1
-            adv_code = entry.get("adv_code") or ""
-            adv_code = clean_dataset_metadata(adv_code)
-            adv_res = run_defense_pipeline(adv_code)
+            adv_res = run_defense_pipeline(adv_code, entry_lang)
             raw_scores_list.append({"label": 1, "score": get_pred_score(adv_res)})
             
             if adv_res["Regex"]: stats["L1_TP"] += 1

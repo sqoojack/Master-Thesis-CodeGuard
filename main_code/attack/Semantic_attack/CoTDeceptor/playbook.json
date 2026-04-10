@@ -1,0 +1,638 @@
+{
+  "version": "2.0",
+  "strategies": [],
+  "strategy_sequences": [
+    {
+      "sequence": [
+        "reorder"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:02:21.170839"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "reorder",
+        "redundant_loop"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:05:37.099908"
+    },
+    {
+      "sequence": [
+        "split"
+      ],
+      "attempts": 4,
+      "successes": 0,
+      "avg_phi": 23.72373799580867,
+      "last_updated": "2026-04-08T12:14:26.817415"
+    },
+    {
+      "sequence": [
+        "closure"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:02:56.207046"
+    },
+    {
+      "sequence": [
+        "indirect"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:03:29.828378"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "shred",
+        "indirect"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:05:39.107488"
+    },
+    {
+      "sequence": [
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 46.60867737548078,
+      "last_updated": "2026-04-08T12:21:12.539333"
+    },
+    {
+      "sequence": [
+        "expand_ternary"
+      ],
+      "attempts": 3,
+      "successes": 0,
+      "avg_phi": 23.844658178148844,
+      "last_updated": "2026-04-08T12:08:40.246914"
+    },
+    {
+      "sequence": [
+        "encode"
+      ],
+      "attempts": 3,
+      "successes": 0,
+      "avg_phi": 35.690863133184166,
+      "last_updated": "2026-04-08T12:22:20.770766"
+    },
+    {
+      "sequence": [
+        "encode",
+        "redundant_loop"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 55.23485612390337,
+      "last_updated": "2026-04-08T12:08:06.014412"
+    },
+    {
+      "sequence": [
+        "shred"
+      ],
+      "attempts": 3,
+      "successes": 0,
+      "avg_phi": 40.31578030830632,
+      "last_updated": "2026-04-08T12:15:28.002881"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 28.949205621537818,
+      "last_updated": "2026-04-08T12:07:27.092569"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_vars",
+        "reorder"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:08:08.034174"
+    },
+    {
+      "sequence": [
+        "reorder",
+        "closure"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-08T12:08:10.051754"
+    },
+    {
+      "sequence": [
+        "encode",
+        "opaque"
+      ],
+      "attempts": 3,
+      "successes": 0,
+      "avg_phi": 34.14657268983209,
+      "last_updated": "2026-04-08T12:19:34.109323"
+    },
+    {
+      "sequence": [
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 7.714045207910318,
+      "last_updated": "2026-04-08T12:13:56.198827"
+    },
+    {
+      "sequence": [
+        "encode",
+        "dead_code",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 41.31692235965606,
+      "last_updated": "2026-04-08T12:14:57.329941"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "shred"
+      ],
+      "attempts": 3,
+      "successes": 0,
+      "avg_phi": 33.87233351745591,
+      "last_updated": "2026-04-08T12:18:32.960259"
+    },
+    {
+      "sequence": [
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 19.921281520775192,
+      "last_updated": "2026-04-08T12:19:03.502682"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "dead_code",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 36.842563041550385,
+      "last_updated": "2026-04-08T12:20:04.213589"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 27.338343733773986,
+      "last_updated": "2026-04-08T12:20:42.006737"
+    },
+    {
+      "sequence": [
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 27.714045207910317,
+      "last_updated": "2026-04-08T12:21:42.562436"
+    }
+  ],
+  "failed_patterns": [
+    {
+      "path": [
+        "reorder"
+      ],
+      "analysis": {
+        "path": [
+          "reorder"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:02:21.170842",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:02:21.170845",
+      "last_seen": "2026-04-08T12:02:21.170846"
+    },
+    {
+      "path": [
+        "rename_func",
+        "reorder",
+        "redundant_loop"
+      ],
+      "analysis": {
+        "path": [
+          "rename_func",
+          "reorder",
+          "redundant_loop"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:05:37.099925",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 2,
+      "first_seen": "2026-04-08T12:02:23.188075",
+      "last_seen": "2026-04-08T12:05:37.099993"
+    },
+    {
+      "path": [
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "split"
+        ],
+        "phi_score": 27.338343733773986,
+        "timestamp": "2026-04-08T12:14:26.817430",
+        "detected_patterns": [],
+        "severity": "medium"
+      },
+      "count": 4,
+      "first_seen": "2026-04-08T12:02:54.190169",
+      "last_seen": "2026-04-08T12:14:26.817446"
+    },
+    {
+      "path": [
+        "closure"
+      ],
+      "analysis": {
+        "path": [
+          "closure"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:02:56.207048",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:02:56.207051",
+      "last_seen": "2026-04-08T12:02:56.207052"
+    },
+    {
+      "path": [
+        "indirect"
+      ],
+      "analysis": {
+        "path": [
+          "indirect"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:03:29.828381",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:03:29.828385",
+      "last_seen": "2026-04-08T12:03:29.828386"
+    },
+    {
+      "path": [
+        "rename_vars",
+        "shred",
+        "indirect"
+      ],
+      "analysis": {
+        "path": [
+          "rename_vars",
+          "shred",
+          "indirect"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:05:39.107497",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 2,
+      "first_seen": "2026-04-08T12:03:31.834298",
+      "last_seen": "2026-04-08T12:05:39.107502"
+    },
+    {
+      "path": [
+        "opaque"
+      ],
+      "analysis": {
+        "path": [
+          "opaque"
+        ],
+        "phi_score": 57.71404520791032,
+        "timestamp": "2026-04-08T12:21:12.539350",
+        "detected_patterns": [],
+        "severity": "low"
+      },
+      "count": 2,
+      "first_seen": "2026-04-08T12:04:02.410042",
+      "last_seen": "2026-04-08T12:21:12.539370"
+    },
+    {
+      "path": [
+        "expand_ternary"
+      ],
+      "analysis": {
+        "path": [
+          "expand_ternary"
+        ],
+        "phi_score": 3.0,
+        "timestamp": "2026-04-08T12:08:40.246941",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 3,
+      "first_seen": "2026-04-08T12:04:32.613922",
+      "last_seen": "2026-04-08T12:08:40.246968"
+    },
+    {
+      "path": [
+        "encode"
+      ],
+      "analysis": {
+        "path": [
+          "encode"
+        ],
+        "phi_score": 36.60287715174575,
+        "timestamp": "2026-04-08T12:22:20.770788",
+        "detected_patterns": [
+          "hallucination_detected"
+        ],
+        "severity": "low"
+      },
+      "count": 3,
+      "first_seen": "2026-04-08T12:05:35.085526",
+      "last_seen": "2026-04-08T12:22:20.770987"
+    },
+    {
+      "path": [
+        "encode",
+        "redundant_loop"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "redundant_loop"
+        ],
+        "phi_score": 55.13707196846727,
+        "timestamp": "2026-04-08T12:08:06.014424",
+        "detected_patterns": [
+          "hallucination_detected"
+        ],
+        "severity": "low"
+      },
+      "count": 2,
+      "first_seen": "2026-04-08T12:06:18.419048",
+      "last_seen": "2026-04-08T12:08:06.014438"
+    },
+    {
+      "path": [
+        "shred"
+      ],
+      "analysis": {
+        "path": [
+          "shred"
+        ],
+        "phi_score": 47.33834373377398,
+        "timestamp": "2026-04-08T12:15:28.002890",
+        "detected_patterns": [],
+        "severity": "low"
+      },
+      "count": 3,
+      "first_seen": "2026-04-08T12:06:57.073834",
+      "last_seen": "2026-04-08T12:15:28.002899"
+    },
+    {
+      "path": [
+        "opaque",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "opaque",
+          "split"
+        ],
+        "phi_score": 28.949205621537818,
+        "timestamp": "2026-04-08T12:07:27.092594",
+        "detected_patterns": [
+          "hallucination_detected"
+        ],
+        "severity": "medium"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:07:27.092621",
+      "last_seen": "2026-04-08T12:07:27.092624"
+    },
+    {
+      "path": [
+        "dead_code",
+        "rename_vars",
+        "reorder"
+      ],
+      "analysis": {
+        "path": [
+          "dead_code",
+          "rename_vars",
+          "reorder"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:08:08.034181",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:08:08.034194",
+      "last_seen": "2026-04-08T12:08:08.034197"
+    },
+    {
+      "path": [
+        "reorder",
+        "closure"
+      ],
+      "analysis": {
+        "path": [
+          "reorder",
+          "closure"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-08T12:08:10.051760",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:08:10.051774",
+      "last_seen": "2026-04-08T12:08:10.051777"
+    },
+    {
+      "path": [
+        "encode",
+        "opaque"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "opaque"
+        ],
+        "phi_score": 36.48848271872766,
+        "timestamp": "2026-04-08T12:19:34.109332",
+        "detected_patterns": [
+          "hallucination_detected"
+        ],
+        "severity": "low"
+      },
+      "count": 3,
+      "first_seen": "2026-04-08T12:11:45.819848",
+      "last_seen": "2026-04-08T12:19:34.109345"
+    },
+    {
+      "path": [
+        "rename_func"
+      ],
+      "analysis": {
+        "path": [
+          "rename_func"
+        ],
+        "phi_score": 7.714045207910318,
+        "timestamp": "2026-04-08T12:13:56.198834",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:13:56.198859",
+      "last_seen": "2026-04-08T12:13:56.198862"
+    },
+    {
+      "path": [
+        "encode",
+        "dead_code",
+        "opaque"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "dead_code",
+          "opaque"
+        ],
+        "phi_score": 41.31692235965606,
+        "timestamp": "2026-04-08T12:14:57.329949",
+        "detected_patterns": [
+          "hallucination_detected"
+        ],
+        "severity": "low"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:14:57.329979",
+      "last_seen": "2026-04-08T12:14:57.329983"
+    },
+    {
+      "path": [
+        "rename_func",
+        "shred"
+      ],
+      "analysis": {
+        "path": [
+          "rename_func",
+          "shred"
+        ],
+        "phi_score": 36.842563041550385,
+        "timestamp": "2026-04-08T12:18:32.960265",
+        "detected_patterns": [],
+        "severity": "low"
+      },
+      "count": 3,
+      "first_seen": "2026-04-08T12:16:16.475986",
+      "last_seen": "2026-04-08T12:18:32.960275"
+    },
+    {
+      "path": [
+        "rename_vars"
+      ],
+      "analysis": {
+        "path": [
+          "rename_vars"
+        ],
+        "phi_score": 36.842563041550385,
+        "timestamp": "2026-04-08T12:19:03.502692",
+        "detected_patterns": [],
+        "severity": "low"
+      },
+      "count": 2,
+      "first_seen": "2026-04-08T12:18:02.525460",
+      "last_seen": "2026-04-08T12:19:03.502706"
+    },
+    {
+      "path": [
+        "rename_vars",
+        "dead_code",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "rename_vars",
+          "dead_code",
+          "split"
+        ],
+        "phi_score": 36.842563041550385,
+        "timestamp": "2026-04-08T12:20:04.213621",
+        "detected_patterns": [],
+        "severity": "low"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:20:04.213685",
+      "last_seen": "2026-04-08T12:20:04.213703"
+    },
+    {
+      "path": [
+        "split",
+        "rename_vars"
+      ],
+      "analysis": {
+        "path": [
+          "split",
+          "rename_vars"
+        ],
+        "phi_score": 27.338343733773986,
+        "timestamp": "2026-04-08T12:20:42.006740",
+        "detected_patterns": [],
+        "severity": "medium"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:20:42.006752",
+      "last_seen": "2026-04-08T12:20:42.006754"
+    },
+    {
+      "path": [
+        "dead_code"
+      ],
+      "analysis": {
+        "path": [
+          "dead_code"
+        ],
+        "phi_score": 27.714045207910317,
+        "timestamp": "2026-04-08T12:21:42.562445",
+        "detected_patterns": [],
+        "severity": "medium"
+      },
+      "count": 1,
+      "first_seen": "2026-04-08T12:21:42.562479",
+      "last_seen": "2026-04-08T12:21:42.562484"
+    }
+  ]
+}
