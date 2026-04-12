@@ -1,6 +1,7 @@
 # --- 專案特定排除 ---
 modernbert_detector/
 dataset/
+Dataset/*
 *.log
 *.pt
 *.pth
@@ -16,7 +17,7 @@ __pycache__/
 venv/
 .venv/
 env/
-
+.env
 # --- IDE 設定 ---
 .vscode/
 .idea/
@@ -40,3 +41,4 @@ main_code/attack/XOXO_Attack/
 *.npy
 *.bin
 build/.env
+build/

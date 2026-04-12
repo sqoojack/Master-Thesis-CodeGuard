@@ -1,6 +1,6 @@
 """
     ----------------------------------- Merged_dataset ------------------------------
-    python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 400
     python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B
     ----------------------------------- Adaptive Attack ------------------------------
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/decoys_attack.jsonl -n 200
@@ -12,9 +12,16 @@
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang solidity
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang java
     CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang java
+    ----------------------------------- CoTDeceptor ------------------------------
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang c
 """
 """
 Grid search optimization for Stage 1, Stage 2, and Stage 3 defense thresholds.
+Supports multi-language dynamic detection for Merged Datasets.
+"""
+"""
+Grid search optimization for Stage 1, Stage 2, and Stage 3 defense thresholds.
+Supports multi-language dynamic detection for Merged Datasets.
 """
 import os
 import json
@@ -25,6 +32,8 @@ import itertools
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tree_sitter import Language, Parser
+from collections import defaultdict
+import random
 
 from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
@@ -32,6 +41,14 @@ from Adversarial_Guardrail import AdversarialGuardrail
 
 import re
 import filelock
+
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def clean_dataset_metadata(code_text):
     if not code_text:
@@ -66,14 +83,29 @@ def setup_tree_sitter(lang_name):
             Language.build_library(lib_path, [repo_dir])
     
     if lang_name.lower() == "solidity" and not os.path.exists(lib_path):
-        print(f"[-] Switch {lang_name} ABI...")
         os.system(f"cd {repo_dir} && git checkout $(git rev-list -n 1 --before='2023-10-01' master)")
         
     if not os.path.exists(lib_path): 
-        print(f"[-] Build {lang_name} lib...")
         Language.build_library(lib_path, [repo_dir])
 
     return Language(lib_path, lang_name)
+
+def detect_language(code_snippet):
+    if not code_snippet:
+        return "c"
+    
+    code_lower = code_snippet.lower()
+    
+    if "pragma solidity" in code_lower or "contract " in code_lower:
+        return "solidity"
+    
+    if "public class " in code_lower or "import java." in code_lower or "system.out." in code_lower:
+        return "java"
+    
+    if "#include" in code_lower or "printf(" in code_lower or "->_ops" in code_lower:
+        return "c"
+    
+    return "c" 
 
 class DummyArgs:
     def __init__(self, batch_size, lang="c"):
@@ -122,10 +154,8 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     try:
         tree = parser.parse(code_bytes)
     except Exception:
-        if debug: print("[DEBUG] Parser error")
         return features
 
-    # Extract Stage 1 features without early exit
     nodes_to_scan = []
     for query in [pre_filter.string_query, pre_filter.comment_query, pre_filter.identifier_query, pre_filter.error_query]:
         for node, _ in query.captures(tree.root_node):
@@ -174,7 +204,6 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     features["s1_spec_other"] = max_spec_other
     features["s1_non_ascii"] = max_non_ascii
 
-    # Extract Stage 2 features
     lang_name = getattr(pre_filter, 'lang_name', 'c')
     comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
     query_adv_str = f"{comment_node} (string_literal) @string (identifier) @identifier"
@@ -201,7 +230,6 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             "whitelisted": whitelisted
         })
 
-    # Extract Stage 3 features
     features["sem_features"] = sem_guard.extract_semantic_features(code)
 
     return features
@@ -313,59 +341,113 @@ def simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, t_l3, th_s1_w, t
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input_path", type=str, required=True, help="Input JSONL path")
+    parser.add_argument("-i", "--input_path", type=str, required=True)
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
-    parser.add_argument("-n", "--num_samples", type=int, default=300, help="Num samples")
+    parser.add_argument("-n", "--num_samples", type=int, default=300)
     parser.add_argument("-bs", "--batch_size", type=int, default=16)
-    parser.add_argument("--max_fpr", type=float, default=0.10, help="Max FPR limit")
-    parser.add_argument("--beta", type=float, default=1.5, help="F-beta weight")
-    parser.add_argument("--lang", type=str, default="c", help="Target lang")
+    parser.add_argument("--max_fpr", type=float, default=0.10)
+    parser.add_argument("--beta", type=float, default=1.5)
+    parser.add_argument("--default_lang", type=str, default="c")
     parser.add_argument("--debug_limit", type=int, default=3)
     args_cmd = parser.parse_args()
 
-    TARGET_LANGUAGE = setup_tree_sitter(args_cmd.lang)
-    TS_PARSER = Parser()
-    TS_PARSER.set_language(TARGET_LANGUAGE)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     print(f"[-] Load model: {args_cmd.model_id}...")
+    set_seed(42)
     tokenizer = AutoTokenizer.from_pretrained(args_cmd.model_id)
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(args_cmd.model_id, torch_dtype=torch.float16).to(device)
     model.eval()
 
-    args_dummy = DummyArgs(args_cmd.batch_size, args_cmd.lang)
-    pre_filter = PreFilter(TS_PARSER, TARGET_LANGUAGE, lang_name=args_cmd.lang)
-    adv_guard = AdversarialGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
-    sem_guard = SemanticGuardrail(model, tokenizer, device, TS_PARSER, TARGET_LANGUAGE, args_dummy)
+    supported_langs = ["c", "java", "solidity"]
+    guardrails = {}
 
-    benign_codes, adv_codes = [], []
+    for lang in supported_langs:
+        try:
+            target_language = setup_tree_sitter(lang)
+            ts_parser = Parser()
+            ts_parser.set_language(target_language)
+
+            args_dummy = DummyArgs(args_cmd.batch_size, lang)
+            guardrails[lang] = {
+                "pre_filter": PreFilter(ts_parser, target_language, lang_name=lang),
+                "adv_guard": AdversarialGuardrail(model, tokenizer, device, ts_parser, target_language, args_dummy),
+                "sem_guard": SemanticGuardrail(model, tokenizer, device, ts_parser, target_language, args_dummy),
+                "parser": ts_parser,
+                "language": target_language,
+                "args_dummy": args_dummy
+            }
+        except Exception as e:
+            print(f"[!] Failed to setup for {lang}: {e}")
+
+    # Paired and stratified sampling logic
+    grouped_entries = defaultdict(list)
     with open(args_cmd.input_path, 'r', encoding='utf-8') as f:
         for line in f:
             if not line.strip(): continue
             try:
                 entry = json.loads(line)
-                if "code" in entry and entry["code"]:
-                    benign_codes.append(clean_dataset_metadata(entry["code"]))
-                if "adv_code" in entry and entry["adv_code"]:
-                    adv_codes.append(clean_dataset_metadata(entry["adv_code"]))
-            except: pass
-            
-    num_per_class = min(args_cmd.num_samples // 2, len(benign_codes), len(adv_codes))
-    np.random.seed(42)
-    selected_benign = np.random.choice(benign_codes, num_per_class, replace=False)
-    selected_adv = np.random.choice(adv_codes, num_per_class, replace=False)
+                lang = entry.get("language", entry.get("lang", ""))
+                code = entry.get("code", "")
+                adv_code = entry.get("adv_code", "")
 
-    print(f"[-] Start extraction on {num_per_class*2} samples...")
+                # Ensure pairing: valid entry must have both code and adv_code
+                if code and adv_code:
+                    clean_code = clean_dataset_metadata(code)
+                    clean_adv = clean_dataset_metadata(adv_code)
+                    attack_type = entry.get("dataset_source", "unknown")
+
+                    grouped_entries[attack_type].append({
+                        "benign": {"code": clean_code, "lang": lang},
+                        "adv": {"code": clean_adv, "lang": lang}
+                    })
+            except Exception: 
+                pass
+            
+    # Shuffle each group for random extraction
+    for atype in grouped_entries:
+        random.shuffle(grouped_entries[atype])
+        
+    num_pairs_needed = args_cmd.num_samples // 2
+    selected_pairs = []
+    active_groups = list(grouped_entries.keys())
+    
+    # Round-robin sampling across attack types to ensure balance
+    while len(selected_pairs) < num_pairs_needed and active_groups:
+        for atype in list(active_groups):
+            if grouped_entries[atype]:
+                selected_pairs.append(grouped_entries[atype].pop(0))
+                if len(selected_pairs) == num_pairs_needed:
+                    break
+            else:
+                active_groups.remove(atype)
+
+    print(f"[-] Selected {len(selected_pairs)} pairs ({len(selected_pairs)*2} samples) from {len(grouped_entries.keys())} attack types.")
+    
     extracted_data = []
     
-    for i, code in enumerate(tqdm(selected_benign, desc="Benign extract")):
-        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, TARGET_LANGUAGE, args_dummy, debug=(i < args_cmd.debug_limit))
+    for i, pair in enumerate(tqdm(selected_pairs, desc="Extract benign")):
+        code = pair["benign"]["code"]
+        lang = pair["benign"]["lang"] if pair["benign"]["lang"] else detect_language(code)
+        lang = lang.lower()
+        if lang not in supported_langs:
+            lang = args_cmd.default_lang
+
+        g = guardrails.get(lang, guardrails[args_cmd.default_lang])
+        feat = extract_features(code, g["pre_filter"], g["adv_guard"], g["sem_guard"], g["parser"], g["language"], g["args_dummy"], debug=(i < args_cmd.debug_limit))
         feat["label"] = 0
         extracted_data.append(feat)
         
-    for i, code in enumerate(tqdm(selected_adv, desc="Adv extract")):
-        feat = extract_features(code, pre_filter, adv_guard, sem_guard, TS_PARSER, TARGET_LANGUAGE, args_dummy, debug=(i < args_cmd.debug_limit))
+    for i, pair in enumerate(tqdm(selected_pairs, desc="Extract adv")):
+        code = pair["adv"]["code"]
+        lang = pair["adv"]["lang"] if pair["adv"]["lang"] else detect_language(code)
+        lang = lang.lower()
+        if lang not in supported_langs:
+            lang = args_cmd.default_lang
+
+        g = guardrails.get(lang, guardrails[args_cmd.default_lang])
+        feat = extract_features(code, g["pre_filter"], g["adv_guard"], g["sem_guard"], g["parser"], g["language"], g["args_dummy"], debug=(i < args_cmd.debug_limit))
         feat["label"] = 1
         extracted_data.append(feat)
 
@@ -430,7 +512,8 @@ def main():
     print("\n" + "="*50 + "\nOptimization Done!\n" + "="*50)
     print(f"Best Params (Stage 1):")
     print(f"  Max Word Len: {best_params['th_s1_w']}")
-    print(f"  Spec Ratio (Str): {best_params['th_s1_s']:.2f}, Spec Ratio (Other): {best_params['th_s1_o']:.2f}")
+    print(f"  Spec Ratio (Str): {best_params['th_s1_s']:.2f}")
+    print(f"  Spec Ratio (Other): {best_params['th_s1_o']:.2f}")
     print(f"  Non-ASCII Ratio: {best_params['th_s1_a']:.2f}")
     print(f"\nBest Params (Stage 2 & 3):")
     print(f"  Adv TH: {best_params['th_adv']:.2f}, String TH: {best_params['th_str']:.2f}")

@@ -11,8 +11,8 @@ A strategy-tree-based code obfuscation tool that iteratively applies transformat
 ### Installation
 1.  **Create and activate the environment:**
     ```bash
-    conda create -n obfuscator python=3.10
-    conda activate obfuscator
+    conda create -n CoTDeceptor python=3.10
+    conda activate CoTDeceptor
     ```
 2.  **Install dependencies:**
     ```bash

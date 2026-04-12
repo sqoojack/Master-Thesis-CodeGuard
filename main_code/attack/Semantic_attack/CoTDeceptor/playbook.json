@@ -26,10 +26,10 @@
       "sequence": [
         "split"
       ],
-      "attempts": 4,
-      "successes": 0,
-      "avg_phi": 23.72373799580867,
-      "last_updated": "2026-04-08T12:14:26.817415"
+      "attempts": 76,
+      "successes": 64,
+      "avg_phi": 43.96407831556888,
+      "last_updated": "2026-04-12T09:41:15.344984"
     },
     {
       "sequence": [
@@ -64,10 +64,10 @@
       "sequence": [
         "opaque"
       ],
-      "attempts": 2,
-      "successes": 0,
-      "avg_phi": 46.60867737548078,
-      "last_updated": "2026-04-08T12:21:12.539333"
+      "attempts": 101,
+      "successes": 90,
+      "avg_phi": 46.03433024505904,
+      "last_updated": "2026-04-12T09:41:16.713768"
     },
     {
       "sequence": [
@@ -82,10 +82,10 @@
       "sequence": [
         "encode"
       ],
-      "attempts": 3,
-      "successes": 0,
-      "avg_phi": 35.690863133184166,
-      "last_updated": "2026-04-08T12:22:20.770766"
+      "attempts": 94,
+      "successes": 85,
+      "avg_phi": 46.91699563191014,
+      "last_updated": "2026-04-12T09:41:16.918133"
     },
     {
       "sequence": [
@@ -101,20 +101,20 @@
       "sequence": [
         "shred"
       ],
-      "attempts": 3,
-      "successes": 0,
-      "avg_phi": 40.31578030830632,
-      "last_updated": "2026-04-08T12:15:28.002881"
+      "attempts": 79,
+      "successes": 68,
+      "avg_phi": 45.10692836613822,
+      "last_updated": "2026-04-12T09:41:16.641351"
     },
     {
       "sequence": [
         "opaque",
         "split"
       ],
-      "attempts": 1,
-      "successes": 0,
-      "avg_phi": 28.949205621537818,
-      "last_updated": "2026-04-08T12:07:27.092569"
+      "attempts": 9,
+      "successes": 6,
+      "avg_phi": 36.9665784023931,
+      "last_updated": "2026-04-12T09:41:11.533158"
     },
     {
       "sequence": [
@@ -142,19 +142,19 @@
         "encode",
         "opaque"
       ],
-      "attempts": 3,
-      "successes": 0,
-      "avg_phi": 34.14657268983209,
-      "last_updated": "2026-04-08T12:19:34.109323"
+      "attempts": 11,
+      "successes": 8,
+      "avg_phi": 46.130883460863295,
+      "last_updated": "2026-04-12T09:41:16.518649"
     },
     {
       "sequence": [
         "rename_func"
       ],
-      "attempts": 1,
-      "successes": 0,
-      "avg_phi": 7.714045207910318,
-      "last_updated": "2026-04-08T12:13:56.198827"
+      "attempts": 76,
+      "successes": 66,
+      "avg_phi": 44.149197963261976,
+      "last_updated": "2026-04-12T09:41:16.984100"
     },
     {
       "sequence": [
@@ -162,29 +162,29 @@
         "dead_code",
         "opaque"
       ],
-      "attempts": 1,
-      "successes": 0,
-      "avg_phi": 41.31692235965606,
-      "last_updated": "2026-04-08T12:14:57.329941"
+      "attempts": 3,
+      "successes": 2,
+      "avg_phi": 47.522307453218694,
+      "last_updated": "2026-04-12T09:41:15.096289"
     },
     {
       "sequence": [
         "rename_func",
         "shred"
       ],
-      "attempts": 3,
-      "successes": 0,
-      "avg_phi": 33.87233351745591,
-      "last_updated": "2026-04-08T12:18:32.960259"
+      "attempts": 10,
+      "successes": 4,
+      "avg_phi": 30.411700055236775,
+      "last_updated": "2026-04-12T09:41:09.895077"
     },
     {
       "sequence": [
         "rename_vars"
       ],
-      "attempts": 2,
-      "successes": 0,
-      "avg_phi": 19.921281520775192,
-      "last_updated": "2026-04-08T12:19:03.502682"
+      "attempts": 93,
+      "successes": 82,
+      "avg_phi": 45.065511430554295,
+      "last_updated": "2026-04-12T09:41:15.603775"
     },
     {
       "sequence": [
@@ -192,69 +192,2442 @@
         "dead_code",
         "split"
       ],
-      "attempts": 1,
-      "successes": 0,
-      "avg_phi": 36.842563041550385,
-      "last_updated": "2026-04-08T12:20:04.213589"
+      "attempts": 2,
+      "successes": 1,
+      "avg_phi": 43.733781520775196,
+      "last_updated": "2026-04-12T09:37:49.562164"
     },
     {
       "sequence": [
         "split",
         "rename_vars"
       ],
-      "attempts": 1,
-      "successes": 0,
-      "avg_phi": 27.338343733773986,
-      "last_updated": "2026-04-08T12:20:42.006737"
+      "attempts": 14,
+      "successes": 8,
+      "avg_phi": 30.88131026669814,
+      "last_updated": "2026-04-12T09:41:06.447032"
     },
     {
       "sequence": [
         "dead_code"
       ],
+      "attempts": 102,
+      "successes": 90,
+      "avg_phi": 45.003323972626596,
+      "last_updated": "2026-04-12T09:41:16.058398"
+    },
+    {
+      "sequence": [
+        "split",
+        "dead_code",
+        "shred"
+      ],
+      "attempts": 3,
+      "successes": 1,
+      "avg_phi": 16.875,
+      "last_updated": "2026-04-12T09:37:35.877566"
+    },
+    {
+      "sequence": [
+        "encode",
+        "split",
+        "dead_code"
+      ],
+      "attempts": 4,
+      "successes": 1,
+      "avg_phi": 12.65625,
+      "last_updated": "2026-04-12T09:37:32.883652"
+    },
+    {
+      "sequence": [
+        "dyn_llm_bfjx"
+      ],
       "attempts": 1,
       "successes": 0,
-      "avg_phi": 27.714045207910317,
-      "last_updated": "2026-04-08T12:21:42.562436"
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-11T21:11:04.514966"
+    },
+    {
+      "sequence": [
+        "dyn_llm_dwkk"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-11T21:11:08.535370"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_func"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 52.75,
+      "last_updated": "2026-04-12T09:41:06.010900"
+    },
+    {
+      "sequence": [
+        "dyn_llm_khej"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-11T21:27:15.050303"
+    },
+    {
+      "sequence": [
+        "dyn_llm_zguh"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-11T21:27:17.069462"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "opaque"
+      ],
+      "attempts": 10,
+      "successes": 9,
+      "avg_phi": 45.5625,
+      "last_updated": "2026-04-12T09:40:50.439071"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "dead_code",
+        "shred"
+      ],
+      "attempts": 5,
+      "successes": 5,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:10.465222"
+    },
+    {
+      "sequence": [
+        "split",
+        "opaque",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:20.670162"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "shred",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:08.326933"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "rename_vars"
+      ],
+      "attempts": 6,
+      "successes": 5,
+      "avg_phi": 42.1875,
+      "last_updated": "2026-04-12T09:41:14.587311"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "shred",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 1,
+      "avg_phi": 25.3125,
+      "last_updated": "2026-04-12T09:37:37.835750"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "shred"
+      ],
+      "attempts": 5,
+      "successes": 4,
+      "avg_phi": 40.5,
+      "last_updated": "2026-04-12T09:41:11.977012"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "shred",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.805664"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "encode"
+      ],
+      "attempts": 9,
+      "successes": 7,
+      "avg_phi": 39.375,
+      "last_updated": "2026-04-12T09:41:14.903574"
+    },
+    {
+      "sequence": [
+        "dyn_llm_xylx"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.829796"
+    },
+    {
+      "sequence": [
+        "dyn_llm_xgdk"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.842140"
+    },
+    {
+      "sequence": [
+        "dyn_llm_oxvc"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.857254"
+    },
+    {
+      "sequence": [
+        "split",
+        "encode",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:23.897743"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "dead_code"
+      ],
+      "attempts": 7,
+      "successes": 6,
+      "avg_phi": 43.392857142857146,
+      "last_updated": "2026-04-12T09:40:56.680759"
+    },
+    {
+      "sequence": [
+        "dyn_llm_nqsp"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.873669"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "shred",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.875248"
+    },
+    {
+      "sequence": [
+        "dyn_llm_inwx"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:20.887110"
+    },
+    {
+      "sequence": [
+        "shred",
+        "encode",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:37.142114"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_func",
+        "shred"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:13.659975"
+    },
+    {
+      "sequence": [
+        "split",
+        "dead_code"
+      ],
+      "attempts": 7,
+      "successes": 6,
+      "avg_phi": 43.392857142857146,
+      "last_updated": "2026-04-12T09:41:13.283028"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "encode",
+        "shred"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:05.094612"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "encode"
+      ],
+      "attempts": 5,
+      "successes": 5,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:11.712663"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "shred",
+        "encode"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:53.731863"
+    },
+    {
+      "sequence": [
+        "split",
+        "opaque"
+      ],
+      "attempts": 6,
+      "successes": 6,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:14.528654"
+    },
+    {
+      "sequence": [
+        "shred",
+        "split"
+      ],
+      "attempts": 8,
+      "successes": 8,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:02.750469"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "opaque",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:21.914250"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "opaque",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:51.271762"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "split",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 1,
+      "avg_phi": 25.3125,
+      "last_updated": "2026-04-12T09:41:09.898820"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "encode",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:03.680999"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "dead_code",
+        "split"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:40.094850"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_func"
+      ],
+      "attempts": 7,
+      "successes": 7,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.703849"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "split",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:55.601534"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "opaque",
+        "split"
+      ],
+      "attempts": 5,
+      "successes": 5,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:09.380222"
+    },
+    {
+      "sequence": [
+        "split",
+        "shred"
+      ],
+      "attempts": 9,
+      "successes": 9,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:15.798129"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "opaque",
+        "encode"
+      ],
+      "attempts": 5,
+      "successes": 3,
+      "avg_phi": 30.375,
+      "last_updated": "2026-04-12T09:40:57.699372"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "split"
+      ],
+      "attempts": 10,
+      "successes": 9,
+      "avg_phi": 45.5625,
+      "last_updated": "2026-04-12T09:41:14.469224"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "split",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:23.871356"
+    },
+    {
+      "sequence": [
+        "split",
+        "opaque",
+        "encode"
+      ],
+      "attempts": 7,
+      "successes": 6,
+      "avg_phi": 43.392857142857146,
+      "last_updated": "2026-04-12T09:41:12.719239"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "opaque"
+      ],
+      "attempts": 9,
+      "successes": 5,
+      "avg_phi": 28.125,
+      "last_updated": "2026-04-12T09:41:05.280772"
+    },
+    {
+      "sequence": [
+        "shred",
+        "rename_vars"
+      ],
+      "attempts": 9,
+      "successes": 5,
+      "avg_phi": 28.125,
+      "last_updated": "2026-04-12T09:41:07.877669"
+    },
+    {
+      "sequence": [
+        "dyn_llm_rtte"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:23.910833"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_vars"
+      ],
+      "attempts": 5,
+      "successes": 1,
+      "avg_phi": 10.125,
+      "last_updated": "2026-04-12T09:37:42.785016"
+    },
+    {
+      "sequence": [
+        "dyn_llm_rmnn"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:23.927360"
+    },
+    {
+      "sequence": [
+        "split",
+        "dead_code",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:23.987617"
+    },
+    {
+      "sequence": [
+        "encode",
+        "dead_code"
+      ],
+      "attempts": 10,
+      "successes": 6,
+      "avg_phi": 30.375,
+      "last_updated": "2026-04-12T09:41:09.842839"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "opaque"
+      ],
+      "attempts": 6,
+      "successes": 6,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:15.928658"
+    },
+    {
+      "sequence": [
+        "split",
+        "shred",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:50.200757"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "split"
+      ],
+      "attempts": 9,
+      "successes": 9,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:04.844771"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "encode",
+        "dead_code"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:45.339242"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "opaque",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:24.911507"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_func",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:09.631167"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "encode",
+        "split"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:08.136638"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "rename_func",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:25.237927"
+    },
+    {
+      "sequence": [
+        "encode",
+        "split",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:25.302800"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "dead_code",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:25.369561"
+    },
+    {
+      "sequence": [
+        "shred",
+        "dead_code",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:29.001502"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_vars"
+      ],
+      "attempts": 12,
+      "successes": 10,
+      "avg_phi": 42.1875,
+      "last_updated": "2026-04-12T09:41:17.045723"
+    },
+    {
+      "sequence": [
+        "shred",
+        "dead_code",
+        "rename_vars"
+      ],
+      "attempts": 5,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.108995"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_func"
+      ],
+      "attempts": 10,
+      "successes": 4,
+      "avg_phi": 20.25,
+      "last_updated": "2026-04-12T09:41:09.848075"
+    },
+    {
+      "sequence": [
+        "dyn_llm_pgxq"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.060090"
+    },
+    {
+      "sequence": [
+        "dyn_llm_legk"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.074833"
+    },
+    {
+      "sequence": [
+        "dyn_llm_bryn"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.089310"
+    },
+    {
+      "sequence": [
+        "dyn_llm_yfmv"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.105713"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_func",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.112061"
+    },
+    {
+      "sequence": [
+        "dyn_llm_qpdc"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:26.127453"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "dead_code",
+        "opaque"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:14.653675"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "shred",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:26.651939"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "encode",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:26.843023"
+    },
+    {
+      "sequence": [
+        "split",
+        "dead_code",
+        "opaque"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:09.067311"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "dead_code"
+      ],
+      "attempts": 6,
+      "successes": 6,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.193424"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "rename_func"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.950446"
+    },
+    {
+      "sequence": [
+        "split",
+        "opaque",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:27.560926"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "encode"
+      ],
+      "attempts": 5,
+      "successes": 5,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:05.827219"
+    },
+    {
+      "sequence": [
+        "encode",
+        "opaque",
+        "rename_vars"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:45.143913"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "shred",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:28.291719"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_func",
+        "rename_vars"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:13.899384"
+    },
+    {
+      "sequence": [
+        "split",
+        "shred",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:29.140251"
+    },
+    {
+      "sequence": [
+        "encode",
+        "shred"
+      ],
+      "attempts": 14,
+      "successes": 9,
+      "avg_phi": 32.544642857142854,
+      "last_updated": "2026-04-12T09:41:16.319617"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "dead_code",
+        "shred"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:58.174736"
+    },
+    {
+      "sequence": [
+        "encode",
+        "dead_code",
+        "shred"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:59.309682"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "encode",
+        "shred"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:10.844416"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "shred"
+      ],
+      "attempts": 8,
+      "successes": 7,
+      "avg_phi": 44.296875,
+      "last_updated": "2026-04-12T09:41:14.406456"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "dead_code",
+        "rename_func"
+      ],
+      "attempts": 4,
+      "successes": 3,
+      "avg_phi": 37.96875,
+      "last_updated": "2026-04-12T09:41:08.639628"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "encode",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:37.454558"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_vars",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:32.200796"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_vars",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:00.493040"
+    },
+    {
+      "sequence": [
+        "encode",
+        "dead_code",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:32.641849"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_func",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:33.261338"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_func",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:33.381232"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "split",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:47.851480"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "opaque",
+        "rename_vars"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.256830"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "split",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:34.144963"
+    },
+    {
+      "sequence": [
+        "split",
+        "encode",
+        "rename_func"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:54.015641"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_vars",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:34.843384"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "opaque",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:02.448361"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_func",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:35.333360"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "shred",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:37.518064"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "split"
+      ],
+      "attempts": 4,
+      "successes": 2,
+      "avg_phi": 25.3125,
+      "last_updated": "2026-04-12T09:40:55.190638"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "shred",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:35.868707"
+    },
+    {
+      "sequence": [
+        "dyn_llm_onbj"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:35.890588"
+    },
+    {
+      "sequence": [
+        "dyn_llm_dzbw"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:35.905857"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "shred",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:35.907852"
+    },
+    {
+      "sequence": [
+        "shred",
+        "rename_func",
+        "opaque"
+      ],
+      "attempts": 3,
+      "successes": 2,
+      "avg_phi": 33.75,
+      "last_updated": "2026-04-12T09:41:11.399266"
+    },
+    {
+      "sequence": [
+        "dyn_llm_sgdy"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:35.921792"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "shred",
+        "split"
+      ],
+      "attempts": 3,
+      "successes": 2,
+      "avg_phi": 33.75,
+      "last_updated": "2026-04-12T09:41:01.434504"
+    },
+    {
+      "sequence": [
+        "dyn_llm_snja"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:35.934893"
+    },
+    {
+      "sequence": [
+        "encode",
+        "split",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:36.518316"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "split",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:36.580028"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_func",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:52.040561"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "opaque",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:37.328138"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "split",
+        "shred"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:40.490345"
+    },
+    {
+      "sequence": [
+        "encode",
+        "split"
+      ],
+      "attempts": 7,
+      "successes": 7,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:15.995322"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "split",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:02.260575"
+    },
+    {
+      "sequence": [
+        "shred",
+        "encode"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:08.386820"
+    },
+    {
+      "sequence": [
+        "shred",
+        "dead_code",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:39.895038"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_func"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:00.858290"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "opaque",
+        "split"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:50.819091"
+    },
+    {
+      "sequence": [
+        "encode",
+        "dead_code",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:41.743267"
+    },
+    {
+      "sequence": [
+        "dyn_llm_pyhj"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:42.719989"
+    },
+    {
+      "sequence": [
+        "dyn_llm_fejt"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:42.735881"
+    },
+    {
+      "sequence": [
+        "dyn_llm_ytgl"
+      ],
+      "attempts": 2,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:42.763293"
+    },
+    {
+      "sequence": [
+        "encode",
+        "opaque",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:42.769323"
+    },
+    {
+      "sequence": [
+        "dyn_llm_hylh"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:37:42.781529"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "dead_code",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:42.854150"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "split",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.277082"
+    },
+    {
+      "sequence": [
+        "shred",
+        "split",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:51.618092"
+    },
+    {
+      "sequence": [
+        "shred",
+        "dead_code"
+      ],
+      "attempts": 7,
+      "successes": 6,
+      "avg_phi": 43.392857142857146,
+      "last_updated": "2026-04-12T09:41:09.831280"
+    },
+    {
+      "sequence": [
+        "split",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:44.287856"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_vars"
+      ],
+      "attempts": 5,
+      "successes": 5,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:05.949457"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "encode",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:56.745587"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "dead_code",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.639560"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "shred",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:02.570928"
+    },
+    {
+      "sequence": [
+        "shred",
+        "rename_func"
+      ],
+      "attempts": 3,
+      "successes": 2,
+      "avg_phi": 33.75,
+      "last_updated": "2026-04-12T09:41:07.631757"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "split",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:48.266208"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_vars",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:48.326695"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "rename_vars",
+        "shred"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:13.598204"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "rename_vars",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:48.632144"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_vars",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:48.949176"
+    },
+    {
+      "sequence": [
+        "shred",
+        "split",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:49.445554"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_func",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.107690"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_func",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.164277"
+    },
+    {
+      "sequence": [
+        "shred",
+        "opaque",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.221370"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_vars",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.657386"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "encode",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.902926"
+    },
+    {
+      "sequence": [
+        "shred",
+        "rename_func",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:50.960977"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "encode",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:51.017149"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "encode",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:55.261307"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "rename_vars",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:51.137237"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "split",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:51.261766"
+    },
+    {
+      "sequence": [
+        "split",
+        "opaque",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:51.322916"
+    },
+    {
+      "sequence": [
+        "encode",
+        "shred",
+        "rename_func"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:48.775998"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_vars",
+        "split"
+      ],
+      "attempts": 2,
+      "successes": 1,
+      "avg_phi": 25.3125,
+      "last_updated": "2026-04-12T09:40:49.871491"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "dead_code",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:37:52.215016"
+    },
+    {
+      "sequence": [
+        "shred",
+        "rename_func",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:49.663625"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "dead_code"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.381098"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "opaque",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:14.716474"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "encode",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:45.841617"
+    },
+    {
+      "sequence": [
+        "shred",
+        "opaque"
+      ],
+      "attempts": 5,
+      "successes": 5,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:11.593153"
+    },
+    {
+      "sequence": [
+        "shred",
+        "encode",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:10.274860"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "shred",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:46.398368"
+    },
+    {
+      "sequence": [
+        "split",
+        "dead_code",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:46.644569"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "encode",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:46.761270"
+    },
+    {
+      "sequence": [
+        "dyn_llm_fafd"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:47.171817"
+    },
+    {
+      "sequence": [
+        "dyn_llm_bmwf"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:47.200653"
+    },
+    {
+      "sequence": [
+        "dyn_llm_xkxj"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:47.212205"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "split",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:47.403217"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "split",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:16.449493"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "rename_vars",
+        "encode"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:03.184789"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "shred"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:52.370548"
+    },
+    {
+      "sequence": [
+        "split",
+        "dead_code",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:48.289073"
+    },
+    {
+      "sequence": [
+        "shred",
+        "split",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:12.300213"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_vars",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:49.533474"
+    },
+    {
+      "sequence": [
+        "encode",
+        "shred",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:49.788475"
+    },
+    {
+      "sequence": [
+        "shred",
+        "encode",
+        "split"
+      ],
+      "attempts": 4,
+      "successes": 1,
+      "avg_phi": 12.65625,
+      "last_updated": "2026-04-12T09:40:57.147924"
+    },
+    {
+      "sequence": [
+        "dyn_llm_ocmt"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:49.896402"
+    },
+    {
+      "sequence": [
+        "dyn_llm_vsnm"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:49.908937"
+    },
+    {
+      "sequence": [
+        "dyn_llm_ulmw"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:49.921502"
+    },
+    {
+      "sequence": [
+        "dyn_llm_vafb"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:40:49.941187"
+    },
+    {
+      "sequence": [
+        "shred",
+        "opaque",
+        "dead_code"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:56.610612"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "shred",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:50.630078"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "encode"
+      ],
+      "attempts": 3,
+      "successes": 3,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:05.410302"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_vars",
+        "opaque"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:00.740483"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "split",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:13.410155"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "encode",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:57.562267"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "rename_func",
+        "encode"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:07.135616"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "shred",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:58.515706"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "shred",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:59.241799"
+    },
+    {
+      "sequence": [
+        "split",
+        "shred",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:40:59.509682"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "encode",
+        "rename_vars"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:16.259702"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_vars",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:01.310298"
+    },
+    {
+      "sequence": [
+        "encode",
+        "shred",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:01.499020"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "split",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:11.087400"
+    },
+    {
+      "sequence": [
+        "split",
+        "encode",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:02.006659"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "shred",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:02.995492"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "encode",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:03.378031"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_func",
+        "rename_vars"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:03.560428"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_func",
+        "split"
+      ],
+      "attempts": 5,
+      "successes": 4,
+      "avg_phi": 40.5,
+      "last_updated": "2026-04-12T09:41:12.966882"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "opaque",
+        "rename_func"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:06.889977"
+    },
+    {
+      "sequence": [
+        "rename_vars",
+        "rename_func",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:04.972871"
+    },
+    {
+      "sequence": [
+        "shred",
+        "encode",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:05.647271"
+    },
+    {
+      "sequence": [
+        "opaque",
+        "encode",
+        "split"
+      ],
+      "attempts": 2,
+      "successes": 2,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:14.079054"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "rename_func",
+        "opaque"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:07.512900"
+    },
+    {
+      "sequence": [
+        "dead_code",
+        "opaque",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:07.951486"
+    },
+    {
+      "sequence": [
+        "shred",
+        "dead_code",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:41:09.853477"
+    },
+    {
+      "sequence": [
+        "split",
+        "rename_vars",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:41:09.859636"
+    },
+    {
+      "sequence": [
+        "dyn_llm_szrz"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:41:09.873653"
+    },
+    {
+      "sequence": [
+        "dyn_llm_veuf"
+      ],
+      "attempts": 1,
+      "successes": 0,
+      "avg_phi": 0.0,
+      "last_updated": "2026-04-12T09:41:09.891810"
+    },
+    {
+      "sequence": [
+        "split",
+        "shred",
+        "encode"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:10.028595"
+    },
+    {
+      "sequence": [
+        "encode",
+        "split",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:10.966624"
+    },
+    {
+      "sequence": [
+        "encode",
+        "rename_vars",
+        "dead_code"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:11.154484"
+    },
+    {
+      "sequence": [
+        "encode",
+        "opaque",
+        "rename_func"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:16.193051"
+    },
+    {
+      "sequence": [
+        "rename_func",
+        "dead_code",
+        "split"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:16.383346"
+    },
+    {
+      "sequence": [
+        "split",
+        "opaque",
+        "shred"
+      ],
+      "attempts": 1,
+      "successes": 1,
+      "avg_phi": 50.625,
+      "last_updated": "2026-04-12T09:41:16.777789"
     }
   ],
   "failed_patterns": [
     {
       "path": [
-        "reorder"
+        "split",
+        "rename_func",
+        "dead_code"
       ],
       "analysis": {
         "path": [
-          "reorder"
+          "split",
+          "rename_func",
+          "dead_code"
         ],
         "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:02:21.170842",
+        "timestamp": "2026-04-12T09:37:26.112063",
         "detected_patterns": [],
         "severity": "high"
       },
       "count": 1,
-      "first_seen": "2026-04-08T12:02:21.170845",
-      "last_seen": "2026-04-08T12:02:21.170846"
+      "first_seen": "2026-04-12T09:37:26.112072",
+      "last_seen": "2026-04-12T09:37:26.112074"
     },
     {
       "path": [
-        "rename_func",
-        "reorder",
-        "redundant_loop"
+        "dyn_llm_qpdc"
       ],
       "analysis": {
         "path": [
-          "rename_func",
-          "reorder",
-          "redundant_loop"
+          "dyn_llm_qpdc"
         ],
         "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:05:37.099925",
+        "timestamp": "2026-04-12T09:37:26.127456",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:26.127474",
+      "last_seen": "2026-04-12T09:37:26.127475"
+    },
+    {
+      "path": [
+        "rename_vars",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "rename_vars",
+          "split"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.875797",
         "detected_patterns": [],
         "severity": "high"
       },
       "count": 2,
-      "first_seen": "2026-04-08T12:02:23.188075",
-      "last_seen": "2026-04-08T12:05:37.099993"
+      "first_seen": "2026-04-12T09:37:35.861627",
+      "last_seen": "2026-04-12T09:37:35.875801"
+    },
+    {
+      "path": [
+        "split",
+        "dead_code"
+      ],
+      "analysis": {
+        "path": [
+          "split",
+          "dead_code"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.863407",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.863412",
+      "last_seen": "2026-04-12T09:37:35.863413"
+    },
+    {
+      "path": [
+        "encode",
+        "shred"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "shred"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.860546",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 5,
+      "first_seen": "2026-04-12T09:37:35.865175",
+      "last_seen": "2026-04-12T09:40:49.860551"
     },
     {
       "path": [
@@ -264,69 +2637,35 @@
         "path": [
           "split"
         ],
-        "phi_score": 27.338343733773986,
-        "timestamp": "2026-04-08T12:14:26.817430",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:47.158116",
         "detected_patterns": [],
-        "severity": "medium"
+        "severity": "high"
       },
       "count": 4,
-      "first_seen": "2026-04-08T12:02:54.190169",
-      "last_seen": "2026-04-08T12:14:26.817446"
+      "first_seen": "2026-04-12T09:37:35.866868",
+      "last_seen": "2026-04-12T09:40:47.158124"
     },
     {
       "path": [
-        "closure"
-      ],
-      "analysis": {
-        "path": [
-          "closure"
-        ],
-        "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:02:56.207048",
-        "detected_patterns": [],
-        "severity": "high"
-      },
-      "count": 1,
-      "first_seen": "2026-04-08T12:02:56.207051",
-      "last_seen": "2026-04-08T12:02:56.207052"
-    },
-    {
-      "path": [
-        "indirect"
-      ],
-      "analysis": {
-        "path": [
-          "indirect"
-        ],
-        "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:03:29.828381",
-        "detected_patterns": [],
-        "severity": "high"
-      },
-      "count": 1,
-      "first_seen": "2026-04-08T12:03:29.828385",
-      "last_seen": "2026-04-08T12:03:29.828386"
-    },
-    {
-      "path": [
-        "rename_vars",
+        "rename_func",
         "shred",
-        "indirect"
+        "opaque"
       ],
       "analysis": {
         "path": [
-          "rename_vars",
+          "rename_func",
           "shred",
-          "indirect"
+          "opaque"
         ],
         "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:05:39.107497",
+        "timestamp": "2026-04-12T09:37:35.868709",
         "detected_patterns": [],
         "severity": "high"
       },
-      "count": 2,
-      "first_seen": "2026-04-08T12:03:31.834298",
-      "last_seen": "2026-04-08T12:05:39.107502"
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.868714",
+      "last_seen": "2026-04-12T09:37:35.868715"
     },
     {
       "path": [
@@ -336,31 +2675,145 @@
         "path": [
           "opaque"
         ],
-        "phi_score": 57.71404520791032,
-        "timestamp": "2026-04-08T12:21:12.539350",
-        "detected_patterns": [],
-        "severity": "low"
-      },
-      "count": 2,
-      "first_seen": "2026-04-08T12:04:02.410042",
-      "last_seen": "2026-04-08T12:21:12.539370"
-    },
-    {
-      "path": [
-        "expand_ternary"
-      ],
-      "analysis": {
-        "path": [
-          "expand_ternary"
-        ],
-        "phi_score": 3.0,
-        "timestamp": "2026-04-08T12:08:40.246941",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.856063",
         "detected_patterns": [],
         "severity": "high"
       },
-      "count": 3,
-      "first_seen": "2026-04-08T12:04:32.613922",
-      "last_seen": "2026-04-08T12:08:40.246968"
+      "count": 7,
+      "first_seen": "2026-04-12T09:37:35.870503",
+      "last_seen": "2026-04-12T09:41:09.856066"
+    },
+    {
+      "path": [
+        "dyn_llm_onbj"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_onbj"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.890590",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.890603",
+      "last_seen": "2026-04-12T09:37:35.890604"
+    },
+    {
+      "path": [
+        "dyn_llm_dzbw"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_dzbw"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.905859",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.905869",
+      "last_seen": "2026-04-12T09:37:35.905870"
+    },
+    {
+      "path": [
+        "rename_func",
+        "shred",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "rename_func",
+          "shred",
+          "split"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.907854",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.907859",
+      "last_seen": "2026-04-12T09:37:35.907860"
+    },
+    {
+      "path": [
+        "shred",
+        "rename_func",
+        "opaque"
+      ],
+      "analysis": {
+        "path": [
+          "shred",
+          "rename_func",
+          "opaque"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.909708",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.909713",
+      "last_seen": "2026-04-12T09:37:35.909714"
+    },
+    {
+      "path": [
+        "dyn_llm_sgdy"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_sgdy"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.921794",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.921805",
+      "last_seen": "2026-04-12T09:37:35.921806"
+    },
+    {
+      "path": [
+        "rename_vars",
+        "shred",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "rename_vars",
+          "shred",
+          "split"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.924120",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.924126",
+      "last_seen": "2026-04-12T09:37:35.924127"
+    },
+    {
+      "path": [
+        "dyn_llm_snja"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_snja"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:35.934896",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:35.934909",
+      "last_seen": "2026-04-12T09:37:35.934911"
     },
     {
       "path": [
@@ -370,54 +2823,14 @@
         "path": [
           "encode"
         ],
-        "phi_score": 36.60287715174575,
-        "timestamp": "2026-04-08T12:22:20.770788",
-        "detected_patterns": [
-          "hallucination_detected"
-        ],
-        "severity": "low"
-      },
-      "count": 3,
-      "first_seen": "2026-04-08T12:05:35.085526",
-      "last_seen": "2026-04-08T12:22:20.770987"
-    },
-    {
-      "path": [
-        "encode",
-        "redundant_loop"
-      ],
-      "analysis": {
-        "path": [
-          "encode",
-          "redundant_loop"
-        ],
-        "phi_score": 55.13707196846727,
-        "timestamp": "2026-04-08T12:08:06.014424",
-        "detected_patterns": [
-          "hallucination_detected"
-        ],
-        "severity": "low"
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.877417",
+        "detected_patterns": [],
+        "severity": "high"
       },
       "count": 2,
-      "first_seen": "2026-04-08T12:06:18.419048",
-      "last_seen": "2026-04-08T12:08:06.014438"
-    },
-    {
-      "path": [
-        "shred"
-      ],
-      "analysis": {
-        "path": [
-          "shred"
-        ],
-        "phi_score": 47.33834373377398,
-        "timestamp": "2026-04-08T12:15:28.002890",
-        "detected_patterns": [],
-        "severity": "low"
-      },
-      "count": 3,
-      "first_seen": "2026-04-08T12:06:57.073834",
-      "last_seen": "2026-04-08T12:15:28.002899"
+      "first_seen": "2026-04-12T09:37:42.673759",
+      "last_seen": "2026-04-12T09:41:09.877422"
     },
     {
       "path": [
@@ -429,77 +2842,31 @@
           "opaque",
           "split"
         ],
-        "phi_score": 28.949205621537818,
-        "timestamp": "2026-04-08T12:07:27.092594",
-        "detected_patterns": [
-          "hallucination_detected"
-        ],
-        "severity": "medium"
-      },
-      "count": 1,
-      "first_seen": "2026-04-08T12:07:27.092621",
-      "last_seen": "2026-04-08T12:07:27.092624"
-    },
-    {
-      "path": [
-        "dead_code",
-        "rename_vars",
-        "reorder"
-      ],
-      "analysis": {
-        "path": [
-          "dead_code",
-          "rename_vars",
-          "reorder"
-        ],
         "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:08:08.034181",
+        "timestamp": "2026-04-12T09:37:42.787452",
         "detected_patterns": [],
         "severity": "high"
       },
-      "count": 1,
-      "first_seen": "2026-04-08T12:08:08.034194",
-      "last_seen": "2026-04-08T12:08:08.034197"
+      "count": 2,
+      "first_seen": "2026-04-12T09:37:42.685599",
+      "last_seen": "2026-04-12T09:37:42.787458"
     },
     {
       "path": [
-        "reorder",
-        "closure"
+        "shred"
       ],
       "analysis": {
         "path": [
-          "reorder",
-          "closure"
+          "shred"
         ],
         "phi_score": 0.0,
-        "timestamp": "2026-04-08T12:08:10.051760",
+        "timestamp": "2026-04-12T09:40:47.147861",
         "detected_patterns": [],
         "severity": "high"
-      },
-      "count": 1,
-      "first_seen": "2026-04-08T12:08:10.051774",
-      "last_seen": "2026-04-08T12:08:10.051777"
-    },
-    {
-      "path": [
-        "encode",
-        "opaque"
-      ],
-      "analysis": {
-        "path": [
-          "encode",
-          "opaque"
-        ],
-        "phi_score": 36.48848271872766,
-        "timestamp": "2026-04-08T12:19:34.109332",
-        "detected_patterns": [
-          "hallucination_detected"
-        ],
-        "severity": "low"
       },
       "count": 3,
-      "first_seen": "2026-04-08T12:11:45.819848",
-      "last_seen": "2026-04-08T12:19:34.109345"
+      "first_seen": "2026-04-12T09:37:42.687776",
+      "last_seen": "2026-04-12T09:40:47.147866"
     },
     {
       "path": [
@@ -509,56 +2876,50 @@
         "path": [
           "rename_func"
         ],
-        "phi_score": 7.714045207910318,
-        "timestamp": "2026-04-08T12:13:56.198834",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.864989",
         "detected_patterns": [],
         "severity": "high"
       },
-      "count": 1,
-      "first_seen": "2026-04-08T12:13:56.198859",
-      "last_seen": "2026-04-08T12:13:56.198862"
-    },
-    {
-      "path": [
-        "encode",
-        "dead_code",
-        "opaque"
-      ],
-      "analysis": {
-        "path": [
-          "encode",
-          "dead_code",
-          "opaque"
-        ],
-        "phi_score": 41.31692235965606,
-        "timestamp": "2026-04-08T12:14:57.329949",
-        "detected_patterns": [
-          "hallucination_detected"
-        ],
-        "severity": "low"
-      },
-      "count": 1,
-      "first_seen": "2026-04-08T12:14:57.329979",
-      "last_seen": "2026-04-08T12:14:57.329983"
+      "count": 4,
+      "first_seen": "2026-04-12T09:37:42.692069",
+      "last_seen": "2026-04-12T09:40:49.864994"
     },
     {
       "path": [
         "rename_func",
-        "shred"
+        "opaque"
       ],
       "analysis": {
         "path": [
           "rename_func",
-          "shred"
+          "opaque"
         ],
-        "phi_score": 36.842563041550385,
-        "timestamp": "2026-04-08T12:18:32.960265",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:42.694459",
         "detected_patterns": [],
-        "severity": "low"
+        "severity": "high"
       },
-      "count": 3,
-      "first_seen": "2026-04-08T12:16:16.475986",
-      "last_seen": "2026-04-08T12:18:32.960275"
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:42.694465",
+      "last_seen": "2026-04-12T09:37:42.694466"
+    },
+    {
+      "path": [
+        "dyn_llm_pyhj"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_pyhj"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:42.720002",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 2,
+      "first_seen": "2026-04-12T09:37:42.708145",
+      "last_seen": "2026-04-12T09:37:42.720021"
     },
     {
       "path": [
@@ -568,35 +2929,213 @@
         "path": [
           "rename_vars"
         ],
-        "phi_score": 36.842563041550385,
-        "timestamp": "2026-04-08T12:19:03.502692",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.902066",
         "detected_patterns": [],
-        "severity": "low"
+        "severity": "high"
       },
-      "count": 2,
-      "first_seen": "2026-04-08T12:18:02.525460",
-      "last_seen": "2026-04-08T12:19:03.502706"
+      "count": 4,
+      "first_seen": "2026-04-12T09:37:42.724261",
+      "last_seen": "2026-04-12T09:41:09.902070"
     },
     {
       "path": [
-        "rename_vars",
-        "dead_code",
-        "split"
+        "dyn_llm_fejt"
       ],
       "analysis": {
         "path": [
-          "rename_vars",
-          "dead_code",
-          "split"
+          "dyn_llm_fejt"
         ],
-        "phi_score": 36.842563041550385,
-        "timestamp": "2026-04-08T12:20:04.213621",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:42.735883",
         "detected_patterns": [],
-        "severity": "low"
+        "severity": "high"
       },
       "count": 1,
-      "first_seen": "2026-04-08T12:20:04.213685",
-      "last_seen": "2026-04-08T12:20:04.213703"
+      "first_seen": "2026-04-12T09:37:42.735897",
+      "last_seen": "2026-04-12T09:37:42.735898"
+    },
+    {
+      "path": [
+        "dyn_llm_ytgl"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_ytgl"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:42.763303",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 2,
+      "first_seen": "2026-04-12T09:37:42.751555",
+      "last_seen": "2026-04-12T09:37:42.763319"
+    },
+    {
+      "path": [
+        "encode",
+        "opaque",
+        "shred"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "opaque",
+          "shred"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:42.769325",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:42.769331",
+      "last_seen": "2026-04-12T09:37:42.769332"
+    },
+    {
+      "path": [
+        "dyn_llm_hylh"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_hylh"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:37:42.781531",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:37:42.781543",
+      "last_seen": "2026-04-12T09:37:42.781544"
+    },
+    {
+      "path": [
+        "dead_code"
+      ],
+      "analysis": {
+        "path": [
+          "dead_code"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.850454",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 5,
+      "first_seen": "2026-04-12T09:40:47.145444",
+      "last_seen": "2026-04-12T09:41:09.850458"
+    },
+    {
+      "path": [
+        "shred",
+        "rename_func"
+      ],
+      "analysis": {
+        "path": [
+          "shred",
+          "rename_func"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:47.150486",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:47.150493",
+      "last_seen": "2026-04-12T09:40:47.150494"
+    },
+    {
+      "path": [
+        "dyn_llm_fafd"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_fafd"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:47.171819",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:47.171831",
+      "last_seen": "2026-04-12T09:40:47.171833"
+    },
+    {
+      "path": [
+        "encode",
+        "dead_code"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "dead_code"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.842843",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 4,
+      "first_seen": "2026-04-12T09:40:47.175297",
+      "last_seen": "2026-04-12T09:41:09.842847"
+    },
+    {
+      "path": [
+        "opaque",
+        "dead_code",
+        "rename_func"
+      ],
+      "analysis": {
+        "path": [
+          "opaque",
+          "dead_code",
+          "rename_func"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:47.180399",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:47.180405",
+      "last_seen": "2026-04-12T09:40:47.180406"
+    },
+    {
+      "path": [
+        "dyn_llm_bmwf"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_bmwf"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:47.200655",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:47.200666",
+      "last_seen": "2026-04-12T09:40:47.200667"
+    },
+    {
+      "path": [
+        "dyn_llm_xkxj"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_xkxj"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:47.212207",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:47.212217",
+      "last_seen": "2026-04-12T09:40:47.212218"
     },
     {
       "path": [
@@ -608,31 +3147,318 @@
           "split",
           "rename_vars"
         ],
-        "phi_score": 27.338343733773986,
-        "timestamp": "2026-04-08T12:20:42.006740",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.928370",
         "detected_patterns": [],
-        "severity": "medium"
+        "severity": "high"
       },
-      "count": 1,
-      "first_seen": "2026-04-08T12:20:42.006752",
-      "last_seen": "2026-04-08T12:20:42.006754"
+      "count": 5,
+      "first_seen": "2026-04-12T09:40:49.862875",
+      "last_seen": "2026-04-12T09:40:49.928375"
     },
     {
       "path": [
+        "shred",
+        "encode",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "shred",
+          "encode",
+          "split"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.943920",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 3,
+      "first_seen": "2026-04-12T09:40:49.867180",
+      "last_seen": "2026-04-12T09:40:49.943925"
+    },
+    {
+      "path": [
+        "opaque",
+        "rename_vars",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "opaque",
+          "rename_vars",
+          "split"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.871495",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.871500",
+      "last_seen": "2026-04-12T09:40:49.871501"
+    },
+    {
+      "path": [
+        "opaque",
+        "shred"
+      ],
+      "analysis": {
+        "path": [
+          "opaque",
+          "shred"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.883158",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.883168",
+      "last_seen": "2026-04-12T09:40:49.883170"
+    },
+    {
+      "path": [
+        "dyn_llm_ocmt"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_ocmt"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.896406",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.896419",
+      "last_seen": "2026-04-12T09:40:49.896421"
+    },
+    {
+      "path": [
+        "dyn_llm_vsnm"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_vsnm"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.908939",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.908948",
+      "last_seen": "2026-04-12T09:40:49.908949"
+    },
+    {
+      "path": [
+        "dyn_llm_ulmw"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_ulmw"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.921504",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.921514",
+      "last_seen": "2026-04-12T09:40:49.921515"
+    },
+    {
+      "path": [
+        "dead_code",
+        "opaque"
+      ],
+      "analysis": {
+        "path": [
+          "dead_code",
+          "opaque"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.923794",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.923799",
+      "last_seen": "2026-04-12T09:40:49.923800"
+    },
+    {
+      "path": [
+        "dyn_llm_vafb"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_vafb"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:40:49.941190",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:40:49.941203",
+      "last_seen": "2026-04-12T09:40:49.941205"
+    },
+    {
+      "path": [
+        "encode",
+        "rename_func",
+        "split"
+      ],
+      "analysis": {
+        "path": [
+          "encode",
+          "rename_func",
+          "split"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.823019",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:41:09.823031",
+      "last_seen": "2026-04-12T09:41:09.823032"
+    },
+    {
+      "path": [
+        "shred",
         "dead_code"
       ],
       "analysis": {
         "path": [
+          "shred",
           "dead_code"
         ],
-        "phi_score": 27.714045207910317,
-        "timestamp": "2026-04-08T12:21:42.562445",
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.831284",
         "detected_patterns": [],
-        "severity": "medium"
+        "severity": "high"
       },
       "count": 1,
-      "first_seen": "2026-04-08T12:21:42.562479",
-      "last_seen": "2026-04-08T12:21:42.562484"
+      "first_seen": "2026-04-12T09:41:09.831289",
+      "last_seen": "2026-04-12T09:41:09.831290"
+    },
+    {
+      "path": [
+        "rename_func",
+        "shred"
+      ],
+      "analysis": {
+        "path": [
+          "rename_func",
+          "shred"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.895082",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 2,
+      "first_seen": "2026-04-12T09:41:09.840226",
+      "last_seen": "2026-04-12T09:41:09.895088"
+    },
+    {
+      "path": [
+        "shred",
+        "dead_code",
+        "rename_func"
+      ],
+      "analysis": {
+        "path": [
+          "shred",
+          "dead_code",
+          "rename_func"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.853479",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:41:09.853484",
+      "last_seen": "2026-04-12T09:41:09.853485"
+    },
+    {
+      "path": [
+        "split",
+        "rename_vars",
+        "dead_code"
+      ],
+      "analysis": {
+        "path": [
+          "split",
+          "rename_vars",
+          "dead_code"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.859638",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:41:09.859643",
+      "last_seen": "2026-04-12T09:41:09.859644"
+    },
+    {
+      "path": [
+        "dyn_llm_szrz"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_szrz"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.873656",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:41:09.873667",
+      "last_seen": "2026-04-12T09:41:09.873668"
+    },
+    {
+      "path": [
+        "dyn_llm_veuf"
+      ],
+      "analysis": {
+        "path": [
+          "dyn_llm_veuf"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.891812",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:41:09.891822",
+      "last_seen": "2026-04-12T09:41:09.891823"
+    },
+    {
+      "path": [
+        "rename_vars",
+        "split",
+        "encode"
+      ],
+      "analysis": {
+        "path": [
+          "rename_vars",
+          "split",
+          "encode"
+        ],
+        "phi_score": 0.0,
+        "timestamp": "2026-04-12T09:41:09.898826",
+        "detected_patterns": [],
+        "severity": "high"
+      },
+      "count": 1,
+      "first_seen": "2026-04-12T09:41:09.898833",
+      "last_seen": "2026-04-12T09:41:09.898834"
     }
   ]
 }

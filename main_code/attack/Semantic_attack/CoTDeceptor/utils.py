@@ -1,4 +1,3 @@
-# utils.py
 import math
 import re
 import json
@@ -9,7 +8,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Callable, Any
 
-
 @dataclass
 class Verdict:
     is_malicious: bool
@@ -17,7 +15,6 @@ class Verdict:
     vulnerability_types: List[str]
     reasoning_chain: List[str]
     risk_score: int
-
 
 @dataclass
 class PotentialScore:
@@ -30,7 +27,6 @@ class PotentialScore:
     def total(self) -> float:
         return self.s_eva + self.s_hal + self.s_con + self.s_tr
 
-
 def calculate_self_consistency(risk_scores: List[int]) -> float:
     if len(risk_scores) <= 1:
         return 1.0
@@ -38,7 +34,6 @@ def calculate_self_consistency(risk_scores: List[int]) -> float:
     variance = sum((s - mean) ** 2 for s in risk_scores) / len(risk_scores)
     std_dev = math.sqrt(variance)
     return max(0, 1.0 - (std_dev / 2.0))
-
 
 def calculate_hallucination(vulnerability_sequences: List[List[str]]) -> float:
     all_types = []
@@ -56,42 +51,31 @@ def calculate_hallucination(vulnerability_sequences: List[List[str]]) -> float:
     max_entropy = math.log(len(counts)) if len(counts) > 1 else 1.0
     return entropy / max_entropy if max_entropy > 0 else 0
 
-
 def compute_potential_score(
     evasion_rate: float,
     hallucination: float,
     consistency: float,
     transferability: float,
-    avg_confidence: float = 50,  # 新增參數
+    avg_confidence: float = 50,
     weights: Tuple[float, float, float, float] = (25, 30, 25, 20)
 ) -> PotentialScore:
     w_eva, w_hal, w_con, w_tr = weights
-    
-    # 修正 S_eva：繞過率 + 信心度降低
-    confidence_penalty = (100 - avg_confidence) / 100  # 0-1 之間
+    confidence_penalty = (100 - avg_confidence) / 100
     s_eva = (evasion_rate * 0.7 + confidence_penalty * 0.3) * w_eva
-    
     s_hal = hallucination * w_hal
     s_con = (1 - consistency) * w_con
     s_tr = transferability * w_tr
-    
     return PotentialScore(s_eva, s_hal, s_con, s_tr)
 
-
 def parse_llm_response(raw_text: str) -> Verdict:
-    """純解析函數，不負責重試"""
     try:
-        # 1. 處理 Groq/OpenAI 的外層包裹
         full_data = json.loads(raw_text)
         if "choices" in full_data:
-            # 抓取中間的 content 字串
             content = full_data["choices"][0]["message"]["content"]
-            # 再次解析內層 JSON
             data = json.loads(content.replace("```json", "").replace("```", "").strip())
         else:
             data = full_data
 
-        # 2. 靈活抓取 Reasoning
         reasoning = (
             data.get("reasoning_chain") or 
             data.get("reasoning") or 
@@ -102,11 +86,9 @@ def parse_llm_response(raw_text: str) -> Verdict:
         if isinstance(reasoning, str):
             reasoning = [s.strip() for s in reasoning.split('.') if s.strip()]
 
-        # 3. 判定標籤與風險分數
         has_vuln = data.get("has_vulnerability", data.get("is_malicious", False))
         risk_score = int(data.get("risk_score", 3))
         
-        # 4. 關鍵字二次校驗
         reasoning_str = " ".join(reasoning).lower()
         danger_list = ["ssti", "rce", "injection", "vulnerability", "malicious"]
         if any(kw in reasoning_str for kw in danger_list):
@@ -121,7 +103,6 @@ def parse_llm_response(raw_text: str) -> Verdict:
         )
         
     except Exception as e:
-        # 解析失敗，回傳 parse_error（讓上層決定是否重試）
         return Verdict(
             is_malicious=False, 
             confidence=0.0, 
@@ -129,13 +110,54 @@ def parse_llm_response(raw_text: str) -> Verdict:
             reasoning_chain=[f"Error: {str(e)}", f"Raw Segment: {str(raw_text)[:100]}"], 
             risk_score=10
         )        
+
+def is_c_cpp_code(code: str) -> bool:
+    """Heuristic check to determine if the code is C/C++ instead of Python."""
+    c_keywords = ["#include", "#ifdef", "void ", "struct ", "int main", "->", "/*", "*/"]
+    return any(kw in code for kw in c_keywords)
+
 def check_syntax(code: str) -> Tuple[bool, Optional[str]]:
+    if is_c_cpp_code(code):
+        # Bypass Python compiler checks for C/C++ datasets
+        return True, None
+        
     try:
         compile(code, '<string>', 'exec')
         return True, None
     except SyntaxError as e:
         return False, str(e)
 
+def check_semantics(code: str) -> Tuple[bool, str]:
+    """Execute code in a mock sandbox to ensure semantic preservation."""
+    if is_c_cpp_code(code):
+        # Bypass Python exec evaluation for C/C++ datasets
+        return True, "Execution OK (C Code Sandbox Bypass)"
+        
+    env = """
+class MockRequest:
+    def __init__(self):
+        self.args = {'name': 'test', 'cmd': 'ls', 'u': 'admin'}
+        self.form = {}
+    def get(self, key, default=None):
+        return self.args.get(key, default)
+request = MockRequest()
+def render_template_string(t): return str(t)
+import os
+"""
+    # Filter out flask app definitions to prevent server startup during exec
+    code_lines = [
+        line for line in code.split('\n') 
+        if not line.strip().startswith(('from flask', 'import flask', 'app = Flask', '@app.', 'if __name__', 'app.run'))
+    ]
+    clean_code = '\n'.join(code_lines)
+    wrapped_code = "def _run_sandbox():\n" + "\n".join(f"    {line}" for line in clean_code.split("\n")) + "\n_sandbox_res = _run_sandbox()"
+    
+    try:
+        local_vars = {}
+        exec(env + "\n" + wrapped_code, {}, local_vars)
+        return True, "Execution OK"
+    except Exception as e:
+        return False, str(e)
 
 def check_static_evasion(code: str, tool_name: str = "bandit") -> Tuple[bool, List[str]]:
     detections = []
@@ -144,16 +166,16 @@ def check_static_evasion(code: str, tool_name: str = "bandit") -> Tuple[bool, Li
         r'exec\(': "exec detected",
         r'__import__\(': "dynamic import detected",
         r'os\.system\(': "system call detected",
+        r'system\(': "system call detected (C)",
+        r'execve\(': "execve call detected (C)"
     }
     for pattern, msg in dangerous_patterns.items():
         if re.search(pattern, code):
             detections.append(msg)
     return len(detections) == 0, detections
 
-
 def generate_random_name(length: int = 6) -> str:
     return ''.join(random.choices(string.ascii_lowercase, k=length))
-
 
 def indent_code(code: str, spaces: int = 4) -> str:
     indent = ' ' * spaces

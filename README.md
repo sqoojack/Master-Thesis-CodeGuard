@@ -1,6 +1,6 @@
-# CodeGuard: A Robust Defense Framework for Code LLMs
+# CodeGuard: A Hierarchical Syntax-Aware Defense Framework Against Indirect Prompt Injection Attack in LLM-based Code Generation
 
-CodeGuard is a comprehensive framework designed to evaluate and defend Code Large Language Models (Code LLMs) against various malicious exploits, including Prompt Injection, Adversarial Attacks, and Semantic Attacks. 
+CodeGuard is a comprehensive framework designed to evaluate and defend LLM-based Code Generation against various malicious exploits, including Prompt Injection, Adversarial Attacks, and Semantic Attacks. 
 
 ### Problem Overview
 ![Problem Overview](images/Problem_Overview.png)
