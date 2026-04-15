@@ -23,7 +23,7 @@ class SemanticGuardrail:
         self.factor_noisy = 0.8
         self.factor_func_macro = 2.0
         self.factor_string = 3.0
-        self.factor_comment = 4.0
+        self.factor_comment = 2.0
         
         self.whitelist = {
             'int', 'char', 'void', 'float', 'double', 'long', 'short', 'unsigned', 'signed',

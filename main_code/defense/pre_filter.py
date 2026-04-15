@@ -36,25 +36,48 @@ class PreFilter:
             self.comment_query = self.language.query("(comment) @comment")
 
     def _check_structural_anomaly(self, text, node_type):
+        # Ignore extremely short snippets
         if len(text) < 15:
             return False, None
             
+        # Skip comment nodes handled by Layer 3
         if node_type == 'comment':
+            non_ascii_count = sum(1 for c in text if ord(c) > 127)
+            # 如果註解中非 ASCII 比例過高，直接攔截
+            if non_ascii_count > 3 and (non_ascii_count / len(text)) > self.s1_ascii:
+                return True, "Comment_Abnormal_Non_ASCII"
             return False, None
             
-        if node_type != 'string_literal':
+        if node_type not in ['string_literal', 'string']:
             max_word_len = max((len(w) for w in text.split()), default=0)
             if max_word_len > self.s1_word:
                 return True, f"Long_Continuous_String ({max_word_len})"
-            
-        special_chars = set("{}[]()=><$|\\\"'`~^")
-        special_count = sum(1 for c in text if c in special_chars)
-        special_ratio = special_count / len(text)
         
-        threshold = self.s1_str if node_type == 'string_literal' else self.s1_other
+        # Exclude Python docstrings and type hints in ERROR nodes
+        if self.lang_name == "python" and node_type == "ERROR":
+            if ">>>" in text or "->" in text:
+                return False, None
+            
+        # Separate common syntax chars from high-risk chars
+        syntax_chars = set("{}[]()=><,.:-@")
+        risk_chars = set("$|\\\"'`~^%;&")
+        
+        syntax_count = sum(1 for c in text if c in syntax_chars)
+        risk_count = sum(1 for c in text if c in risk_chars)
+        
+        # Lower syntax penalty for non-string nodes
+        if node_type not in ['string_literal', 'string']:
+            adjusted_special_count = (syntax_count * 0.1) + risk_count
+        else:
+            adjusted_special_count = (syntax_count * 0.5) + risk_count
+            
+        special_ratio = adjusted_special_count / len(text)
+        threshold = self.s1_str if node_type in ['string_literal', 'string'] else self.s1_other
+        
         if special_ratio > threshold:
             return True, f"High_Special_Char_Ratio ({special_ratio:.2f})"
             
+        # Check for abnormal non-ASCII characters
         non_ascii_count = sum(1 for c in text if ord(c) > 127)
         if non_ascii_count > 5 and (non_ascii_count / len(text)) > self.s1_ascii:
             return True, "Abnormal_Non_ASCII_Ratio"

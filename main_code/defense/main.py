@@ -5,16 +5,19 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     -H 100.0 \
     -L3_b 0.020 \
     -L3_t 0.05 \
-    -i Dataset/XOXO_attack/XOXO_defect_detection_codebert.jsonl \
-    -o result/sanitized_data/CodeGuard_sanitized_XOXO_0.02_0.05.jsonl
+    -i Dataset/XOXO_attack/XOXO_defect_detection_codebert.jsonl
     
 ShadowCode:
 CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
+    --s1_word 50 \
+    --s1_str 0.20 \
+    --s1_other 0.10 \
+    --s1_ascii 0.05 \
     -A 9 \
-    -L3_b 100.020 \
-    -L3_t 100.05 \
-    -i Dataset/ShadowCode/shadowcode_dataset.jsonl \
-    -o result/sanitized_data/shadowcode/CodeGuard_9.jsonl
+    --th_string 7.00 \
+    -L3_b 0.260 \
+    -L3_t 0.2 \
+    -i Dataset/ShadowCode/shadowcode_dataset.jsonl
     
 Flashboom:
 CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
@@ -24,7 +27,6 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     -L3_t 100.10 \
     --model_id Salesforce/codegen-350M-multi \
     -i Dataset/Flashboom/flashboom_dataset.jsonl \
-    -o result/sanitized_data/flashboom/CodeGuard.jsonl  \
     --lang solidity
     
 ITGen:
@@ -35,7 +37,6 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     -L3_t 0.10 \
     --model_id Salesforce/codegen-350M-multi  \
     -i Dataset/ITGen/itgen_dataset.jsonl \
-    -o result/sanitized_data/ITGen/CodeGuard.jsonl \
     --lang java
     
 CoTDeceptor:
@@ -49,8 +50,7 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     -L3_b 0.11 \
     -L3_t 0.20 \
     --model_id Salesforce/codegen-350M-multi  \
-    -i Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl \
-    -o result/sanitized_data/CoTDecptor/CodeGuard.jsonl
+    -i Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl
     
 Merged:
 CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
@@ -62,8 +62,7 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     --th_string 12.0 \
     -L3_b 0.160 \
     -L3_t 0.10 \
-    -i Dataset/merged_all/tiny_merged_dataset.jsonl \
-    -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
+    -i Dataset/merged_all/tiny_merged_dataset.jsonl
     
 Merged_dynamic_threshold:
 CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
@@ -71,8 +70,7 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     --th_string 11.0 \
     -L3_b 0.032 \
     -L3_t 0.10 \
-    -i Dataset/merged_all/tiny_merged_dataset.jsonl \
-    -o result/sanitized_data/merged_all/CodeGuard_sanitized.jsonl
+    -i Dataset/merged_all/tiny_merged_dataset.jsonl
 
 Adaptive attack:
     decoys:
@@ -81,8 +79,7 @@ Adaptive attack:
         --th_string 11.0 \
         -L3_b 0.034 \
         -L3_t 0.10 \
-        -i Dataset/Adaptive_attack/decoys_attack.jsonl \
-        -o result/sanitized_data/merged_all/CodeGuard_sanitized_decoy.jsonl
+        -i Dataset/Adaptive_attack/decoys_attack.jsonl
         
     copy_trigger:
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
@@ -90,8 +87,7 @@ Adaptive attack:
         --th_string 11.0 \
         -L3_b 0.03 \
         -L3_t 0.10 \
-        -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl \
-        -o result/sanitized_data/merged_all/CodeGuard_sanitized_copy_trigger.jsonl
+        -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl
         
     contextual:
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
@@ -99,8 +95,7 @@ Adaptive attack:
         --th_string 9.0 \
         -L3_b 0.034 \
         -L3_t 0.10 \
-        -i Dataset/Adaptive_attack/contextual_attack.jsonl \
-        -o result/sanitized_data/merged_all/CodeGuard_sanitized_contextual.jsonl
+        -i Dataset/Adaptive_attack/contextual_attack.jsonl
 """ 
 
 import os
@@ -130,7 +125,6 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 class NumpyEncoder(json.JSONEncoder):
-    """Convert numpy data types to Python native types for JSON serialization."""
     def default(self, obj):
         if isinstance(obj, np.floating):
             return float(obj)
@@ -141,7 +135,6 @@ class NumpyEncoder(json.JSONEncoder):
         return super(NumpyEncoder, self).default(obj)
 
 def clean_dataset_metadata(code_text):
-    """Clean specific metadata tags from dataset."""
     if not code_text:
         return ""
     
@@ -151,7 +144,6 @@ def clean_dataset_metadata(code_text):
     return cleaned_code
 
 def setup_tree_sitter(lang_name):
-    """Setup and return the Tree-sitter Language object with Solidity ABI fallback."""
     ts_dir = "build"
     repo_name = f"tree-sitter-{lang_name}"
     repo_dir = os.path.join(ts_dir, repo_name)
@@ -160,7 +152,8 @@ def setup_tree_sitter(lang_name):
     repo_map = {
         "solidity": "https://github.com/JoranHonig/tree-sitter-solidity",
         "java": "https://github.com/tree-sitter/tree-sitter-java",
-        "c": "https://github.com/tree-sitter/tree-sitter-c"
+        "c": "https://github.com/tree-sitter/tree-sitter-c",
+        "python": "https://github.com/tree-sitter/tree-sitter-python"
     }
     repo_url = repo_map.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
 
@@ -183,7 +176,6 @@ def setup_tree_sitter(lang_name):
     return Language(lib_path, lang_name)
 
 def detect_language(code_snippet):
-    """Heuristic logic to detect programming language if missing from JSON entry."""
     if not code_snippet:
         return "c"
     
@@ -194,6 +186,9 @@ def detect_language(code_snippet):
     
     if "public class " in code_lower or "import java." in code_lower or "system.out." in code_lower:
         return "java"
+
+    if "def " in code_lower or "elif " in code_lower or "import " in code_lower and "java" not in code_lower:
+        return "python"
     
     if "#include" in code_lower or "printf(" in code_lower or "->_ops" in code_lower:
         return "c"
@@ -203,22 +198,19 @@ def detect_language(code_snippet):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input_path", type=str, required=True)
-    parser.add_argument("-o", "--output_path", type=str, required=True)
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
     
-    parser.add_argument("--s1_word", type=int, default=50) # 優化值
+    parser.add_argument("--s1_word", type=int, default=50) 
     parser.add_argument("--s1_str", type=float, default=0.20)
     parser.add_argument("--s1_other", type=float, default=0.10)
     parser.add_argument("--s1_ascii", type=float, default=0.05)
     
-    parser.add_argument("-A", "--adversarial_threshold", type=float, default=10.0, 
-                        help="Threshold for deleting adversarial comments.")
-    parser.add_argument("--th_string", type=float, default=15.0,
-                        help="Threshold specifically for string literals.")
+    parser.add_argument("-A", "--adversarial_threshold", type=float, default=10.0)
+    parser.add_argument("--th_string", type=float, default=15.0)
     
     parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.025)
     parser.add_argument("-L3_t", "--l3_surprise_tolerance", type=float, default=0.10)
-    parser.add_argument("--default_lang", type=str, default="c", help="Fallback language")
+    parser.add_argument("--default_lang", type=str, default="c")
     
     args = parser.parse_args()
 
@@ -234,6 +226,9 @@ def main():
         elif "copy" in args.input_path: attack_type = "Adaptive_copy"
         elif "contextual" in args.input_path: attack_type = "Adaptive_contextual"
         
+    # Auto-generate output path based on attack_type
+    args.output_path = f"result/sanitized_data/{attack_type}/CodeGuard.jsonl"
+        
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[-] Load Guard Model: {args.model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
@@ -242,7 +237,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype=torch.float16).to(device)
     model.eval()
 
-    supported_langs = ["c", "java", "solidity"]
+    supported_langs = ["c", "java", "solidity", "python"]
     guardrails = {}
 
     for lang in supported_langs:
@@ -260,7 +255,7 @@ def main():
                     ts_parser, 
                     target_language, 
                     lang_name=lang,
-                    s1_word=args.s1_word,   # 傳入優化後的參數
+                    s1_word=args.s1_word,   
                     s1_str=args.s1_str,
                     s1_other=args.s1_other,
                     s1_ascii=args.s1_ascii
@@ -283,6 +278,7 @@ def main():
     
     print(f"[-] Semantic Params -> Base Influence: {args.l3_base_influence}, Tolerance: {args.l3_surprise_tolerance}")
     print(f"[-] Adversarial Params -> Threshold: {args.adversarial_threshold}")
+    print(f"[-] Output Path -> {args.output_path}")
     
     with open(args.input_path, 'r', encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
@@ -297,10 +293,10 @@ def main():
                 return max([d.get("influence", 0.0) / d.get("threshold", 1.0) for d in layer_results["sem_debug"]], default=0.0)
             return 0.0
 
-    debug_log_dir = "result/debug_logs"
+    debug_log_dir = f"result/debug_logs/{attack_type}"
     os.makedirs(debug_log_dir, exist_ok=True)
-    fn_file = open(os.path.join(debug_log_dir, f"{attack_type}_FN_log.jsonl"), 'w', encoding='utf-8')
-    fp_file = open(os.path.join(debug_log_dir, f"{attack_type}_FP_log.jsonl"), 'w', encoding='utf-8')
+    fn_file = open(os.path.join(debug_log_dir, f"FN_log.jsonl"), 'w', encoding='utf-8')
+    fp_file = open(os.path.join(debug_log_dir, f"FP_log.jsonl"), 'w', encoding='utf-8')
     
     output_dir = os.path.dirname(args.output_path)
     if output_dir:
@@ -414,10 +410,8 @@ def main():
     fn_file.close()
     fp_file.close()
     
-    eval_dir = "result/evaluation"
+    eval_dir = f"result/evaluation/{attack_type}"
     os.makedirs(eval_dir, exist_ok=True)
-    with open(os.path.join(eval_dir, f"raw_scores_{attack_type}.json"), 'w', encoding='utf-8') as f:
-        json.dump(raw_scores_list, f, indent=4, cls=NumpyEncoder)
 
     tp_final, fp_final = stats["L123_TP"], stats["L123_FP"]
     tn_final, fn_final = stats["Total_Benign"] - fp_final, stats["Total_Adv"] - tp_final
@@ -483,7 +477,7 @@ def main():
         }
     }
 
-    f1_log_path = os.path.join(eval_dir, f"f1_score_{attack_type}.json")
+    f1_log_path = os.path.join(eval_dir, f"f1_score.json")
     existing_records = []
     
     if os.path.exists(f1_log_path):

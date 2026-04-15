@@ -13,7 +13,6 @@ class AdversarialGuardrail:
         self.adversarial_threshold = args.adversarial_threshold
         self.th_string = args.th_string
 
-        # 擴充白名單：加入常見的 C/C++ 註解前綴與標記
         self.docstring_keywords = [
             '>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 
             'Given a', 'For a', 'Calculate', 'is a palindrome',
@@ -29,27 +28,51 @@ class AdversarialGuardrail:
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.detach().cpu().to(torch.float32).numpy()
 
-    def calc_mink_score(self, text, k=0.5): 
+    def calc_mink_score(self, text, k=None): 
+        # Calculate Min-k% score
         if not text or len(text) < 10: 
             return 0.0
             
         inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        token_count = inputs["input_ids"].shape[1]
         
-        # 如果 Token 數量太少（小於 5 個），不具備統計意義，直接放行
-        if inputs["input_ids"].shape[1] < 5: 
+        if token_count < 5: 
             return 0.0
+            
+        if k is None:
+            if token_count < 20:
+                dynamic_k = 0.8
+            elif token_count < 50:
+                dynamic_k = 0.5
+            elif token_count < 200:
+                dynamic_k = 0.3
+            else:
+                dynamic_k = 0.1
+        else:
+            dynamic_k = k
             
         losses = self.get_token_losses(inputs["input_ids"])
         if len(losses) == 0: 
             return 0.0
             
+        # Calculate original Min-K%
         sorted_losses = np.sort(losses)[::-1]
-        num_tokens = max(1, int(len(losses) * k))
-        top_k_losses = sorted_losses[:num_tokens]
-        return np.mean(top_k_losses)
+        num_tokens_to_keep = max(1, int(len(losses) * dynamic_k))
+        top_k_losses = sorted_losses[:num_tokens_to_keep]
+        mink_loss = np.mean(top_k_losses)
+        
+        # New logic: Burst detection via Sliding Window
+        window_size = 5
+        if len(losses) >= window_size:
+            # Calculate max moving average of losses
+            max_window_loss = max([np.mean(losses[i:i+window_size]) for i in range(len(losses)-window_size+1)])
+            # Use a weighted maximum to balance global and local anomalies
+            # 0.8 is a sensitivity factor you can tune
+            return max(mink_loss, max_window_loss * 0.8) 
+            
+        return mink_loss
 
     def is_whitelisted(self, text):
-        """判斷是否為白名單內的常見標記"""
         return any(kw.lower() in text.lower() for kw in self.docstring_keywords) or text.count('>>>') >= 1
 
     def detect(self, code):
@@ -58,11 +81,13 @@ class AdversarialGuardrail:
         code_bytes = bytes(code, "utf8")
         try:
             tree = self.parser.parse(code_bytes)
-        except:
+        except Exception as e:
             return False, code, []
 
+        # Fix TS query for python string nodes
         comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
-        query_str = f"{comment_node} (string_literal) @string (identifier) @identifier"
+        string_node = "(string) @string" if self.lang_name == "python" else "(string_literal) @string"
+        query_str = f"{comment_node} {string_node} (identifier) @identifier"
 
         query = self.language.query(query_str)
         captures = query.captures(tree.root_node)
@@ -71,40 +96,43 @@ class AdversarialGuardrail:
         triggered = False
         adv_debug = [] 
         
+        # Target tokens that lower loss maliciously
+        special_tokens = ['<|', '|>', '<EOL>', '<s>', '</s>']
+
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
             
-            # 1. 極端過濾：Token 數量太少（小於 4 個）的註解無法構成 Prompt Injection，直接忽略
             if len(text) < 10: 
                 continue 
 
-            score = self.calc_mink_score(text, k=0.5)
+            score = self.calc_mink_score(text, k=None)
             
-            # 2. 基礎門檻
             current_threshold = self.adversarial_threshold
+            string_th = self.th_string
             whitelisted = self.is_whitelisted(text)
             
-            # 3. 動態長度懲罰 (Length Penalty)
-            # 若字元長度小於 40，則依比例提高門檻，越短門檻越高 (最多增加 5.0 分)
             if type_name == 'comment' and len(text) < 40:
-                length_penalty = 5.0 * (1.0 - (len(text) / 40.0))
+                length_penalty = 2.0 * (1.0 - (len(text) / 40.0))
                 current_threshold += length_penalty
             
-            # 4. 白名單加權
-            if type_name == 'comment' and whitelisted:
+            # Allow whitelisted modifiers for both docstrings and comments
+            if whitelisted:
                 current_threshold *= 1.5 
+                string_th *= 1.5
+                
+            # Penalize injected tokens to prevent evasion
+            if any(t in text for t in special_tokens) or '\r' in text:
+                score += 10.0
             
-            # 判定是否觸發
             is_this_triggered = False
             if type_name == 'comment' and score > current_threshold:
                 is_this_triggered = True
                 replacements.append((node.start_byte, node.end_byte, "")) 
-            elif type_name == 'string' and score > self.th_string:
+            elif type_name == 'string' and score > string_th:
                 is_this_triggered = True
                 replacements.append((node.start_byte, node.end_byte, '""')) 
             elif type_name == 'identifier' and score > current_threshold:
                 is_this_triggered = True
-                # 變數若包含惡意提示，替換為中性的 VAR_ADV 以維持語法結構
                 replacements.append((node.start_byte, node.end_byte, "VAR_ADV")) 
 
             if is_this_triggered:
@@ -112,7 +140,7 @@ class AdversarialGuardrail:
                 adv_debug.append({
                     "type": type_name,
                     "score": score,
-                    "threshold_applied": current_threshold, # 紀錄實際套用的門檻以供分析
+                    "threshold_applied": current_threshold if type_name != 'string' else string_th,
                     "whitelisted": whitelisted,
                     "text_snippet": text[:50].replace('\n', ' ')
                 })

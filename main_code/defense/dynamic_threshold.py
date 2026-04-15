@@ -1,4 +1,6 @@
 """
+    ----------------------------------- ShadowCode / INSEC / XOXO ------------------------------
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/ShadowCode/shadowcode_dataset.jsonl -n 400
     ----------------------------------- Merged_dataset ------------------------------
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 400
     python main_code/defense/dynamic_threshold.py -i Dataset/merged_all/tiny_merged_dataset.jsonl -n 200 --model_id Qwen/Qwen3.5-4B
@@ -7,11 +9,8 @@
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl -n 200
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/contextual_attack.jsonl -n 200
     ----------------------------------- ITGen & Flashboom ------------------------------
-    python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200
     CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang solidity
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang solidity
     CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang java
-    CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id google/gemma-4-E4B --lang java
     ----------------------------------- CoTDeceptor ------------------------------
     CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang c
 """
@@ -68,7 +67,8 @@ def setup_tree_sitter(lang_name):
     repo_map = {
         "solidity": "https://github.com/JoranHonig/tree-sitter-solidity",
         "java": "https://github.com/tree-sitter/tree-sitter-java",
-        "c": "https://github.com/tree-sitter/tree-sitter-c"
+        "c": "https://github.com/tree-sitter/tree-sitter-c",
+        "python": "https://github.com/tree-sitter/tree-sitter-python"
     }
     repo_url = repo_map.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
 
@@ -101,6 +101,9 @@ def detect_language(code_snippet):
     
     if "public class " in code_lower or "import java." in code_lower or "system.out." in code_lower:
         return "java"
+
+    if "def " in code_lower or "elif " in code_lower or "import " in code_lower and "java" not in code_lower:
+        return "python"
     
     if "#include" in code_lower or "printf(" in code_lower or "->_ops" in code_lower:
         return "c"
@@ -177,7 +180,7 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
                 break
                 
         if len(text) >= 15 and node_type != 'comment':
-            if node_type != 'string_literal':
+            if node_type not in ['string_literal', 'string']:
                 w_len = max((len(w) for w in text.split()), default=0)
                 max_word = max(max_word, w_len)
             
@@ -185,7 +188,7 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             spec_count = sum(1 for c in text if c in special_chars)
             spec_ratio = spec_count / len(text)
             
-            if node_type == 'string_literal':
+            if node_type in ['string_literal', 'string']:
                 max_spec_str = max(max_spec_str, spec_ratio)
             else:
                 max_spec_other = max(max_spec_other, spec_ratio)
@@ -198,15 +201,11 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     if decoys:
         regex_hit = True
 
-    features["regex_triggered"] = regex_hit
-    features["s1_max_word"] = max_word
-    features["s1_spec_str"] = max_spec_str
-    features["s1_spec_other"] = max_spec_other
-    features["s1_non_ascii"] = max_non_ascii
-
     lang_name = getattr(pre_filter, 'lang_name', 'c')
     comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
-    query_adv_str = f"{comment_node} (string_literal) @string (identifier) @identifier"
+    string_node = "(string) @string" if lang_name == "python" else "(string_literal) @string"
+    
+    query_adv_str = f"{comment_node} {string_node} (identifier) @identifier"
     query_adv = language.query(query_adv_str)
     captures_adv = query_adv.captures(tree.root_node)
     
@@ -360,7 +359,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args_cmd.model_id, torch_dtype=torch.float16).to(device)
     model.eval()
 
-    supported_langs = ["c", "java", "solidity"]
+    supported_langs = ["c", "java", "solidity", "python"]
     guardrails = {}
 
     for lang in supported_langs:
@@ -381,7 +380,6 @@ def main():
         except Exception as e:
             print(f"[!] Failed to setup for {lang}: {e}")
 
-    # Paired and stratified sampling logic
     grouped_entries = defaultdict(list)
     with open(args_cmd.input_path, 'r', encoding='utf-8') as f:
         for line in f:
@@ -392,7 +390,6 @@ def main():
                 code = entry.get("code", "")
                 adv_code = entry.get("adv_code", "")
 
-                # Ensure pairing: valid entry must have both code and adv_code
                 if code and adv_code:
                     clean_code = clean_dataset_metadata(code)
                     clean_adv = clean_dataset_metadata(adv_code)
@@ -405,7 +402,6 @@ def main():
             except Exception: 
                 pass
             
-    # Shuffle each group for random extraction
     for atype in grouped_entries:
         random.shuffle(grouped_entries[atype])
         
@@ -413,7 +409,6 @@ def main():
     selected_pairs = []
     active_groups = list(grouped_entries.keys())
     
-    # Round-robin sampling across attack types to ensure balance
     while len(selected_pairs) < num_pairs_needed and active_groups:
         for atype in list(active_groups):
             if grouped_entries[atype]:
@@ -460,10 +455,10 @@ def main():
     s1_o_space = [0.1, 0.3, 0.7]
     s1_a_space = [0.05, 0.40, 0.60, 0.80]
     
-    adv_th_space = np.arange(8.0, 30.0, 2.0)
-    str_th_space = np.arange(8.0, 30.0, 2.0)
+    adv_th_space = np.arange(1.0, 15.0, 1.0)
+    str_th_space = np.arange(1.0, 15.0, 1.0)
     l3_th_space = np.arange(0.010, 0.300, 0.05)
-    l3_tolerance_space = [0.10, 0.20]
+    l3_tolerance_space = [0.10, 0.20, 0.30, 0.40]
 
     param_grid = list(itertools.product(
         adv_th_space, str_th_space, l3_th_space, l3_tolerance_space,
