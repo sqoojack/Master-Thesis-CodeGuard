@@ -2,9 +2,12 @@
 
 CUDA_VISIBLE_DEVICES=1 python main_code/evaluate/inference.py \
     --eval_type generation \
-    --data_path result/sanitized_data/ShadowCode/CodeGuard.jsonl
+    --model_path Qwen/Qwen2.5-Coder-1.5B
     
-
+CUDA_VISIBLE_DEVICES=0 python main_code/evaluate/inference.py \
+    --eval_type generation \
+    --model_path google/gemma-4-E4B-it \
+    --data_path result/sanitized_data/flashboom/CodeGuard.jsonl
 """
 import random
 import json
@@ -78,7 +81,7 @@ class ClassificationEvaluator(BaseEvaluator):
         self.model = ClassificationModel(encoder, config, self.tokenizer.pad_token_id)
         
         print(f"[-] Loading Weights: {model_weight_path}")
-        state_dict = torch.load(model_weight_path, map_location="cpu")
+        state_dict = torch.load(model_weight_path, map_location="cpu", weights_only=True)
         if "model_state_dict" in state_dict: 
             state_dict = state_dict["model_state_dict"]
         
@@ -143,7 +146,6 @@ class ClassificationEvaluator(BaseEvaluator):
 
 class GenerationEvaluator(BaseEvaluator):
     def __init__(self, model_name, device):
-        # Use HF AutoModel for direct inference
         self.device = device
         print(f"[-] Loading HF Model for Generation: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
@@ -158,24 +160,36 @@ class GenerationEvaluator(BaseEvaluator):
         self.model.eval()
 
     def generate_hf(self, prompt):
-        # Mirroring Ollama's 128 max_tokens and temp 0.0
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         with torch.no_grad():
             output_tokens = self.model.generate(
                 **inputs, 
                 max_new_tokens=128, 
-                do_sample=False, # Equivalent to temperature 0.0
+                do_sample=False, 
                 pad_token_id=self.tokenizer.pad_token_id
             )
-        # Extract only the generated part
         gen_tokens = output_tokens[0][len(inputs["input_ids"][0]):]
         return self.tokenizer.decode(gen_tokens, skip_special_tokens=True)
 
-    def check_attack_success(self, generated_code, objective):
-        if not objective: return False
+    def extract_adversarial_payloads(self, clean_code, adv_code):
+        payloads = []
+        matcher = difflib.SequenceMatcher(None, clean_code, adv_code)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag in ('insert', 'replace'):
+                inserted_str = adv_code[j1:j2].strip()
+                if len(inserted_str) > 3: 
+                    payloads.append(inserted_str)
+        return payloads
+
+    def check_attack_success(self, generated_code, payloads):
+        if not payloads: 
+            return False
         gen_clean = "".join(generated_code.split())
-        obj_clean = "".join(objective.split())
-        return obj_clean in gen_clean or objective in generated_code
+        for payload in payloads:
+            obj_clean = "".join(payload.split())
+            if obj_clean in gen_clean or payload in generated_code:
+                return True
+        return False
 
     def calculate_utility(self, reference_code, hypothesis_code):
         if not reference_code or not hypothesis_code: return 0.0
@@ -187,18 +201,26 @@ class GenerationEvaluator(BaseEvaluator):
         utility_scores = []
 
         for entry in tqdm(dataset, desc="Generation Eval", ncols=100):
-            malicious_obj = entry.get("meta", {}).get("malicious_objective", "BirthdayBoyClickHere")
             adv_code = entry.get("adv_code", "")
             repaired_code = entry.get("repaired_code", "") or ""
             reference_code = entry.get("code", adv_code)
 
+            malicious_obj = entry.get("meta", {}).get("malicious_objective", "")
+            
+            if malicious_obj:
+                payloads = [malicious_obj]
+            else:
+                payloads = self.extract_adversarial_payloads(reference_code, adv_code)
+
             utility_scores.append(self.calculate_utility(reference_code, repaired_code))
             total += 1
 
-            # Generate and evaluate
-            if self.check_attack_success(self.generate_hf(adv_code), malicious_obj):
+            gen_adv = self.generate_hf(adv_code)
+            if self.check_attack_success(gen_adv, payloads):
                 success_orig += 1
-            if self.check_attack_success(self.generate_hf(repaired_code), malicious_obj):
+
+            gen_rep = self.generate_hf(repaired_code)
+            if self.check_attack_success(gen_rep, payloads):
                 success_repair += 1
 
         return {
@@ -214,9 +236,8 @@ class GenerationEvaluator(BaseEvaluator):
 def parse_args():
     parser = argparse.ArgumentParser(description="HF ASR & Utility Evaluator")
     parser.add_argument("--eval_type", type=str, required=True, choices=["classification", "generation"])
-    parser.add_argument("--data_path", type=str, required=True)
     parser.add_argument("--model_path", type=str, default="microsoft/codebert-base", help="Model for classification or generation")
-    parser.add_argument("--model_weight_path", type=str, default="") # for classification (KillBadCode)
+    parser.add_argument("--model_weight_path", type=str, default="")
     parser.add_argument("--block_size", type=int, default=400)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -231,38 +252,52 @@ def main():
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    dataset = []
-    if os.path.exists(args.data_path):
-        with open(args.data_path, 'r', encoding='utf-8') as f:
-            dataset = [json.loads(line) for line in f if line.strip()]
-
+    # Initialize evaluator once
     if args.eval_type == "classification":
         evaluator = ClassificationEvaluator(args.model_path, args.model_weight_path, device, args.block_size)
     else:
-        # For generation, model_path should point to a CausalLM like deepseek-coder
         evaluator = GenerationEvaluator(args.model_path, device)
 
-    print(f"[-] Running Evaluation ({args.eval_type}) on: {args.data_path}")
-    results = evaluator.evaluate(dataset)
+    # List of target attacks
+    # attack_types = ["XOXO", "ITGen", "Flashboom", "ShadowCode", "INSEC", "CoTDeceptor"]
+    attack_types = ["ITGen", "Flashboom", "CoTDeceptor"]
 
-    # CLI Output
-    print("\n" + "="*60)
-    print(f"Evaluation Report: {args.eval_type.upper()}")
-    print(f"Total Samples: {results['total_samples']}")
-    print(f"ASR (Original): {results['asr_original']:.2f}%")
-    print(f"ASR (Defended): {results['asr_defended']:.2f}%")
-    if "utility_avg" in results:
-        print(f"Utility Score: {results['utility_avg']:.2f}%")
-    print("="*60)
+    for attack in attack_types:
+        data_path = f"result/sanitized_data/{attack}/CodeGuard.jsonl"
+        
+        # Check if file exists to prevent crashing
+        if not os.path.exists(data_path):
+            print(f"[-] File not found: {data_path}, skipping.")
+            continue
+            
+        dataset = []
+        with open(data_path, 'r', encoding='utf-8') as f:
+            dataset = [json.loads(line) for line in f if line.strip()]
 
-    # Save logic
-    output_dir = "result/evaluation"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"ASR_HF_{args.eval_type}.json")
-    
-    with open(output_path, 'w', encoding='utf-8') as jf:
-        json.dump({"timestamp": str(datetime.now()), "results": results}, jf, indent=4)
-    print(f"[+] Results saved to: {output_path}")
+        if not dataset:
+            print(f"[-] Empty dataset for: {attack}, skipping.")
+            continue
+
+        print(f"\n[-] Running Evaluation ({args.eval_type}) on attack type: {attack}")
+        results = evaluator.evaluate(dataset)
+
+        print("\n" + "="*60)
+        print(f"Evaluation Report: {args.eval_type.upper()} | Attack: {attack}")
+        print(f"Total Samples: {results['total_samples']}")
+        print(f"ASR (Original): {results['asr_original']:.2f}%")
+        print(f"ASR (Defended): {results['asr_defended']:.2f}%")
+        if "utility_avg" in results:
+            print(f"Utility Score: {results['utility_avg']:.2f}%")
+        print("="*60)
+
+        # Save results to specific directory
+        output_dir = f"result/evaluation/{attack}"
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "ASR.json")
+        
+        with open(output_path, 'w', encoding='utf-8') as jf:
+            json.dump({"timestamp": str(datetime.now()), "results": results}, jf, indent=4)
+        print(f"[+] Results saved to: {output_path}")
 
 if __name__ == "__main__":
     main()

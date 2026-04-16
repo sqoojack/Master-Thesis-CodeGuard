@@ -9,10 +9,6 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     
 ShadowCode:
 CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
-    --s1_word 50 \
-    --s1_str 0.20 \
-    --s1_other 0.10 \
-    --s1_ascii 0.05 \
     -A 9 \
     --th_string 7.00 \
     -L3_b 0.260 \
@@ -21,13 +17,12 @@ CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     
 Flashboom:
 CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
-    -A 16.00 \
-    --th_string 14.00 \
-    -L3_b 100.10 \
-    -L3_t 100.10 \
+    -A 13.00 \
+    --th_string 13.00 \
+    -L3_b 0.26 \
+    -L3_t 0.10 \
     --model_id Salesforce/codegen-350M-multi \
-    -i Dataset/Flashboom/flashboom_dataset.jsonl \
-    --lang solidity
+    -i Dataset/Flashboom/flashboom_dataset.jsonl
     
 ITGen:
 CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
@@ -37,10 +32,9 @@ CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
     -L3_t 0.10 \
     --model_id Salesforce/codegen-350M-multi  \
     -i Dataset/ITGen/itgen_dataset.jsonl \
-    --lang java
     
 CoTDeceptor:
-CUDA_VISIBLE_DEVICES=0 python main_code/defense/main.py \
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/main.py \
     --s1_word 50 \
     --s1_str 0.20 \
     --s1_other 0.10 \
@@ -322,31 +316,35 @@ def main():
 
                 pipeline = guardrails.get(detected_lang, guardrails[args.default_lang])
                 
+                # Stage 1: Pre-filter (Regex)
                 reg_detected, stage1_code, reg_debug = pipeline["pre_filter"].detect(code_to_check)
                 res["reg_debug"] = reg_debug
-                res["final_code"] = stage1_code
-                
                 if reg_detected:
                     res["Regex"] = True
                     res["Regex_Indep"] = True
-                    return res 
-
+                
+                # Stage 2: Adversarial Guard
                 adv_detected, stage2_code, adv_debug = pipeline["adv_guard"].detect(stage1_code)
                 res["adv_debug"] = adv_debug
-                res["final_code"] = stage2_code
-                
                 if adv_detected:
                     res["Adversarial"] = True
-                    res["Adversarial_Indep"] = True
-                    return res 
+                    if not reg_detected:
+                        res["Adversarial_Indep"] = True 
 
+                # Stage 3: Semantic Guard
                 sem_detected, final_code, sem_debug = pipeline["sem_guard"].detect(stage2_code)
                 res["sem_debug"] = sem_debug
-                res["final_code"] = final_code
-                
                 if sem_detected:
                     res["Semantic"] = True
-                    res["Semantic_Indep"] = True
+                    if not reg_detected and not adv_detected:
+                        res["Semantic_Indep"] = True 
+                
+                # Aggressive sanitization: Replace code entirely if any attack is detected
+                is_attack = res["Regex"] or res["Adversarial"] or res["Semantic"]
+                if is_attack:
+                    res["final_code"] = "// [MALICIOUS CODE DETECTED AND PURGED]"
+                else:
+                    res["final_code"] = final_code
                 
                 return res
 

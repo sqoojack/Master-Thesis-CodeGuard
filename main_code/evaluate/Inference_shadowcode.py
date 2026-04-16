@@ -1,6 +1,6 @@
 """
 python main_code/evaluate/Inference_shadowcode.py \
-    --clean_data result/sanitized_data/shadowcode/CodeGuard_9.jsonl \
+    --clean_data result/sanitized_data/ShadowCode/CodeGuard.jsonl \
     -A 9 \
     -m 9
     

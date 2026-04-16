@@ -9,18 +9,10 @@
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/copy_trigger_attack.jsonl -n 200
     python main_code/defense/dynamic_threshold.py -i Dataset/Adaptive_attack/contextual_attack.jsonl -n 200
     ----------------------------------- ITGen & Flashboom ------------------------------
-    CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang solidity
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang java
+    CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/Flashboom/flashboom_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/ITGen/itgen_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi
     ----------------------------------- CoTDeceptor ------------------------------
-    CUDA_VISIBLE_DEVICES=0 python main_code/defense/dynamic_threshold.py -i Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi --lang c
-"""
-"""
-Grid search optimization for Stage 1, Stage 2, and Stage 3 defense thresholds.
-Supports multi-language dynamic detection for Merged Datasets.
-"""
-"""
-Grid search optimization for Stage 1, Stage 2, and Stage 3 defense thresholds.
-Supports multi-language dynamic detection for Merged Datasets.
+    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -i Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl -n 200 --model_id Salesforce/codegen-350M-multi
 """
 import os
 import json
@@ -200,6 +192,8 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     decoys = pre_filter._detect_dead_decoys(tree, code_bytes)
     if decoys:
         regex_hit = True
+    
+    features["regex_triggered"] = regex_hit
 
     lang_name = getattr(pre_filter, 'lang_name', 'c')
     comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
@@ -228,6 +222,8 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             "length_penalty": float(length_penalty),
             "whitelisted": whitelisted
         })
+    
+    
 
     features["sem_features"] = sem_guard.extract_semantic_features(code)
 
@@ -458,7 +454,7 @@ def main():
     adv_th_space = np.arange(1.0, 15.0, 1.0)
     str_th_space = np.arange(1.0, 15.0, 1.0)
     l3_th_space = np.arange(0.010, 0.300, 0.05)
-    l3_tolerance_space = [0.10, 0.20, 0.30, 0.40]
+    l3_tolerance_space = [0.01, 0.10, 0.20, 0.30, 0.40]
 
     param_grid = list(itertools.product(
         adv_th_space, str_th_space, l3_th_space, l3_tolerance_space,

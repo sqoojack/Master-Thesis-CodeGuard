@@ -23,6 +23,9 @@ class PreFilter:
             ),
             "Prompt_Template_Injection": re.compile(
                 r"(?i)(\{\{.*?\}\}|\(\)\s*=>|<script>|javascript:|\[\'\$[A-Za-z]+)"
+            ),
+            "Chr_Obfuscation": re.compile(
+                r"(chr\(\d+\)\s*\+\s*){2,}chr\(\d+\)"
             )
         }
         
@@ -47,6 +50,9 @@ class PreFilter:
             if non_ascii_count > 3 and (non_ascii_count / len(text)) > self.s1_ascii:
                 return True, "Comment_Abnormal_Non_ASCII"
             return False, None
+        
+        if node_type == 'identifier' and (text.startswith('_dead_') or len(text) > 20):
+            return True, f"Suspicious_Identifier ({text[:10]}...)"
             
         if node_type not in ['string_literal', 'string']:
             max_word_len = max((len(w) for w in text.split()), default=0)
@@ -88,10 +94,10 @@ class PreFilter:
         # 1. Define query for functions based on language
         if self.lang_name == "java":
             query_funcs_str = "(method_declaration) @func"
-        elif self.lang_name == "solidity":
+        elif self.lang_name in ["c", "python", "solidity"]:
             query_funcs_str = "(function_definition) @func"
         else:
-            query_funcs_str = "(function_definition) @func (method_declaration) @func"
+            query_funcs_str = "(function_definition) @func"
 
         try:
             query_funcs = self.language.query(query_funcs_str)

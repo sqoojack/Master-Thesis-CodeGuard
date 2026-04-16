@@ -127,13 +127,13 @@ class AdversarialGuardrail:
             is_this_triggered = False
             if type_name == 'comment' and score > current_threshold:
                 is_this_triggered = True
-                replacements.append((node.start_byte, node.end_byte, "")) 
+                replacements.append((node.start_byte, node.end_byte, b"")) # Prune comment
             elif type_name == 'string' and score > string_th:
                 is_this_triggered = True
-                replacements.append((node.start_byte, node.end_byte, '""')) 
+                replacements.append((node.start_byte, node.end_byte, b'""')) # Neutralize string
             elif type_name == 'identifier' and score > current_threshold:
                 is_this_triggered = True
-                replacements.append((node.start_byte, node.end_byte, "VAR_ADV")) 
+                replacements.append((node.start_byte, node.end_byte, b"")) # Prune identifier
 
             if is_this_triggered:
                 triggered = True
@@ -149,8 +149,11 @@ class AdversarialGuardrail:
             return False, code, []
 
         replacements.sort(key=lambda x: x[0], reverse=True)
-        new_code_bytes = list(code_bytes)
-        for start, end, rep_text in replacements:
-            new_code_bytes[start:end] = bytes(rep_text, "utf8")
+        new_code_bytes = bytearray(code_bytes)
+        for start, end, rep_bytes in replacements:
+            if rep_bytes == b"":
+                del new_code_bytes[start:end]
+            else:
+                new_code_bytes[start:end] = rep_bytes
             
-        return triggered, bytes(new_code_bytes).decode("utf8", errors='ignore'), adv_debug
+        return triggered, new_code_bytes.decode("utf8", errors='ignore'), adv_debug

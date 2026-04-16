@@ -116,7 +116,8 @@ class SemanticGuardrail:
         try:
             tree = self.parser.parse(code_bytes)
             comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
-            query_str = f"(identifier) @identifier {comment_node} (string_literal) @string"
+            string_node = "(string) @string" if self.lang_name == "python" else "(string_literal) @string"
+            query_str = f"(identifier) @identifier {comment_node} {string_node} (ERROR) @error"
             query = self.language.query(query_str)
             captures = query.captures(tree.root_node)
         except Exception:
@@ -153,7 +154,7 @@ class SemanticGuardrail:
             if token_idx >= len(offsets): break
             start_off, end_off = offsets[token_idx]
             for v_info in valid_var_ranges:
-                if start_off >= v_info['start'] and end_off <= v_info['end']:
+                if not (end_off <= v_info['start'] or start_off >= v_info['end']):
                     node_key = (v_info['start'], v_info['end'], v_info['text'])
                     var_ctx_map[node_key].append(loss)
                     var_meta_map[node_key] = v_info
@@ -244,14 +245,13 @@ class SemanticGuardrail:
         if is_attack:
             toxic_nodes.sort(key=lambda x: x['start'], reverse=True)
             new_code_bytes = bytearray(code_bytes)
-            for idx, meta in enumerate(toxic_nodes):
-                if meta['node_type'] == 'comment':
-                    rep = b"/* */"
-                elif meta['node_type'] == 'string':
-                    rep = b'""'
+            for meta in toxic_nodes:
+                # Prune the malicious node completely instead of neutralizing
+                if meta['node_type'] == 'string':
+                    new_code_bytes[meta['start']:meta['end']] = b'""'
                 else:
-                    rep = f"VAR_SEMANTIC_{idx}".encode('utf8')
-                new_code_bytes[meta['start']:meta['end']] = rep
+                    del new_code_bytes[meta['start']:meta['end']]
+            
             repaired_code = new_code_bytes.decode("utf8", errors="ignore")
 
         return is_attack, repaired_code, debug_info
