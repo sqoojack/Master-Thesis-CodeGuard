@@ -1,6 +1,6 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, GPTQConfig, BitsAndBytesConfig
 import tiktoken
-from insec.secret import OPENAI_KEY
+# from insec.secret import OPENAI_KEY
 import openai
 import torch
 import random
@@ -301,7 +301,7 @@ class OpenAIModel(ModelWrapper):
     def __init__(self, model_name, temp, top_p):
         self.model_name = model_name
         self.tokenizer = tiktoken.encoding_for_model(model_name)
-        openai.api_key = OPENAI_KEY
+        openai.api_key = os.getenv("OPENAI_API_KEY", "")
 
         self.temp = temp
         self.top_p = top_p

@@ -1,8 +1,9 @@
 from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
-from insec import AttackedInfillingDataset
-from insec import BBSoftLossCalculator
-from insec.optimizers import RandomPoolOptimizer
+from insec.dataset import AttackedInfillingDataset
+from insec.BBSoftLossCalculator import BBSoftLossCalculator
+from insec.optimizers.RandomPoolOptimizer import RandomPoolOptimizer
 from insec.ModelWrapper import load_model
 from insec import Logger
 
@@ -15,6 +16,7 @@ class AdversarialTrainer:
 
         self.dataset, self.data_loader = self.load_dataset()
         self.model = load_model(args)
+        # Load the actual tokenizer object instead of just the path string
         self.attack_tokenizer = self.load_attack_tokenizer()
         self.loss_calculator = self.create_loss_calculator()
 
@@ -22,7 +24,8 @@ class AdversarialTrainer:
         self.optimizer = self.create_optimizer(logger)
 
     def load_attack_tokenizer(self):
-        return self.args.attack_tokenizer
+        # Load pretrained tokenizer from the provided path string
+        return AutoTokenizer.from_pretrained(self.args.attack_tokenizer)
 
     def load_dataset(self):
         dataset = AttackedInfillingDataset(self.args, "train")
@@ -43,7 +46,7 @@ class AdversarialTrainer:
                 self.args.device,
                 self.model,
                 self.args.batch_size,
-                self.attack_tokenizer,
+                self.attack_tokenizer, # Pass the tokenizer object
                 self.args,
             )
         else:
@@ -53,7 +56,7 @@ class AdversarialTrainer:
         if self.args.optimizer == "random_pool":
             optimizer = RandomPoolOptimizer(
                 self.args,
-                self.attack_tokenizer,
+                self.attack_tokenizer, # Pass the tokenizer object
                 self.loss_calculator,
                 logger,
             )

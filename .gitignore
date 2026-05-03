@@ -6,6 +6,7 @@ Dataset/*
 *.pt
 *.pth
 *.h5
+*.tsv
 
 # --- Python 暫存檔 ---
 __pycache__/

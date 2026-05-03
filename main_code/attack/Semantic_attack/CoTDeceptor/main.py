@@ -1,3 +1,4 @@
+# python main.py -m 0
 import asyncio
 import time
 import argparse

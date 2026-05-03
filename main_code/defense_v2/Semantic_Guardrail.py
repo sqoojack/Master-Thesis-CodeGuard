@@ -2,6 +2,47 @@ import torch
 import numpy as np
 import math
 from collections import defaultdict
+from xgboost import XGBClassifier
+from sklearn.preprocessing import StandardScaler
+
+class MLGuardrailModel:
+    def __init__(self):
+        self.model = XGBClassifier(
+            n_estimators=100,
+            max_depth=3,
+            learning_rate=0.1,
+            eval_metric='logloss',
+            random_state=42
+        )
+        self.scaler = StandardScaler()
+        self.is_trained = False
+
+    def train(self, features_list, labels):
+        if not features_list or len(np.unique(labels)) < 2:
+            print("[WARN] Need both benign and adversarial samples for XGBoost.")
+            return
+        
+        X = np.array([[f['influence'], f['surprise'], f['z_score'], f['factor']] 
+                      for f in features_list])
+        y = np.array(labels)
+        
+        X_scaled = self.scaler.fit_transform(X)
+        self.model.fit(X_scaled, y)
+        self.is_trained = True
+        print(f"[INFO] XGBoost training completed with {len(X)} samples.")
+
+    def predict(self, features, threshold=0.85):
+        if not self.is_trained or not features:
+            return np.array([0] * len(features))
+        
+        X = np.array([[f['influence'], f['surprise'], f['z_score'], f['factor']] 
+                      for f in features])
+        X_scaled = self.scaler.transform(X)
+        
+        # Use probability threshold to reduce False Positives
+        probs = self.model.predict_proba(X_scaled)[:, 1]
+        return (probs > threshold).astype(int)
+
 
 class SemanticGuardrail:
     def __init__(self, model, tokenizer, device, parser, language, args):
@@ -12,8 +53,7 @@ class SemanticGuardrail:
         self.language = language
         self.lang_name = getattr(args, 'lang', 'c').lower()
         
-        self.base_influence_th = getattr(args, 'l3_base_influence', 0.025)
-        self.surprise_tolerance = getattr(args, 'l3_surprise_tolerance', 0.10)
+        self.ml_model = MLGuardrailModel()
         
         self.max_ctx_threshold = 1.5
         self.top_k_candidates = 30
@@ -90,10 +130,8 @@ class SemanticGuardrail:
         return 'NORMAL'
 
     def calculate_dynamic_factor(self, token_type, is_noisy, node_len, local_z_score=0.0):
-        # Base factor is neutral
         factor = 1.0
         
-        # Apply continuous logarithmic scaling for strings and comments
         if token_type in ('STRING', 'COMMENT'):
             factor += math.log1p(max(0, node_len)) / 10.0
         elif token_type in ('FUNC', 'MACRO'):
@@ -102,7 +140,6 @@ class SemanticGuardrail:
         if is_noisy: 
             factor *= 0.8
             
-        # Adjust factor based on local z-score (outliers get lower thresholds)
         if local_z_score > 0:
             factor *= max(0.5, 1.0 - (local_z_score * 0.1))
             
@@ -228,8 +265,9 @@ class SemanticGuardrail:
                 "type": meta['type'],
                 "is_noisy": meta['is_noisy'],
                 "influence": float(stats["influence"]),
-                "surprise": cand['surprise_score'],
-                "factor": factor
+                "surprise": float(cand['surprise_score']),
+                "z_score": float(stats["z_score"]),
+                "factor": float(factor)
             })
         return features
 
@@ -242,36 +280,41 @@ class SemanticGuardrail:
 
         candidate_stats = self._calculate_candidate_stats(code_bytes, top_candidates)
         
+        features_for_ml = []
+        for stats in candidate_stats:
+            cand = stats["cand"]
+            meta = cand['meta']
+            factor = self.calculate_dynamic_factor(meta['type'], meta['is_noisy'], meta['len'], stats['z_score'])
+            features_for_ml.append({
+                "influence": float(stats["influence"]),
+                "surprise": float(cand['surprise_score']),
+                "z_score": float(stats['z_score']),
+                "factor": float(factor)
+            })
+            
+        predictions = self.ml_model.predict(features_for_ml, threshold=0.85)
+        
         toxic_nodes = []
         is_attack = False
         debug_info = []
 
-        for stats in candidate_stats:
+        for idx, stats in enumerate(candidate_stats):
             cand = stats["cand"]
             var = cand['var']
-            surprise = cand['surprise_score']
             meta = cand['meta']
-            influence = stats['influence']
-            z_score = stats['z_score']
             
-            factor = self.calculate_dynamic_factor(meta['type'], meta['is_noisy'], meta['len'], z_score)
+            triggered = (predictions[idx] == 1) if len(predictions) > 0 else False
             
-            min_threshold = self.base_influence_th * 0.1
-            dynamic_threshold = max(min_threshold, (self.base_influence_th * factor) / (1.0 + (surprise * self.surprise_tolerance)))
-            
-            triggered = False
-            # Trigger if influence breaches the dynamic threshold or acts as an extreme outlier
-            if influence > dynamic_threshold or z_score > 3.0:
-                triggered = True
+            if triggered:
                 toxic_nodes.append(meta)
                 is_attack = True
             
             debug_info.append({
                 "var": var[:50].replace('\n', ' '), 
-                "surprise": surprise,
-                "influence": influence,
-                "z_score": float(z_score),
-                "threshold": dynamic_threshold,
+                "surprise": cand['surprise_score'],
+                "influence": stats['influence'],
+                "z_score": float(stats['z_score']),
+                "factor": features_for_ml[idx]['factor'],
                 "is_noisy": meta['is_noisy'],
                 "type": meta['type'],
                 "triggered": triggered

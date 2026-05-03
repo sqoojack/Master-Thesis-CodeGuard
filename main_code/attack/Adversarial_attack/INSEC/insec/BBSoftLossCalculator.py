@@ -13,7 +13,6 @@ from transformers import AutoTokenizer
 
 from insec.AdversarialTokens import AdversarialTokens
 from insec.dataset import AttackedInfillingSample, AttackedInfillingDataset
-from insec.ModelWrapper import OpenAIModel
 
 MAX_NEW_TOKEN_DICT = {
     "cwe-020_py": 1,
@@ -135,7 +134,6 @@ def is_cwe943_py_vul(code):
 
 
 def is_cwe131_cpp_vul(code):
-    # return not re.findall(r"\+\s*[1-9]\d*", code)
     return code in ["));", ");"]
 
 
@@ -200,9 +198,8 @@ class BBSoftLossCalculator:
     ):
         self.device = device
         self.model = model
-        self.attack_tokenizer = AutoTokenizer.from_pretrained(
-            "bigcode/starcoderbase-3b"
-        )
+        # Use the provided tokenizer object from the trainer
+        self.attack_tokenizer = attack_tokenizer
         self.loss_divisor = batch_size
         self.temp = args.temp
         self.top_p = args.top_p
@@ -216,7 +213,7 @@ class BBSoftLossCalculator:
         self.is_baseline = False
 
     def forward(self, batch: AttackedInfillingDataset, adv_tokens: AdversarialTokens, num_gen):
-        if type(self.model) == OpenAIModel and self.args.parallel_requests:
+        if self.model.__class__.__name__ == "OpenAIModel" and self.args.parallel_requests:
             return self._forward_parallel(batch, adv_tokens, num_gen)
         else:
             return self._forward(batch, adv_tokens, num_gen)
@@ -233,12 +230,10 @@ class BBSoftLossCalculator:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(partial(self._calculate_reward, adv_tokens, num_gen), batch))
        
-        # wait for all results to be computed
         loss = 0
         for result in results:
             loss += 1 - result
 
-        # add a delay to prevent rate limit
         time.sleep(10)
 
         return loss / len(batch)
@@ -247,12 +242,16 @@ class BBSoftLossCalculator:
         prompt, suffix = adv_tokens.insert_adv_tokens(sample)        
         sec_checker = sample.cwe if sample.cwe is not None else self.sec_checker
       
+        # Fix: Handle fallback for exact_match using the newly added argument
         if sec_checker not in MAX_NEW_TOKEN_DICT:
-            raise NotImplementedError(
-                f"Sec checker {sec_checker} missing a max token count"
-            )
-        
-        max_new_tokens = MAX_NEW_TOKEN_DICT[sec_checker]
+            if sec_checker == "exact_match" and hasattr(self.args, "exact_match_max_tokens"):
+                max_new_tokens = self.args.exact_match_max_tokens
+            else:
+                raise NotImplementedError(
+                    f"Sec checker {sec_checker} missing a max token count"
+                )
+        else:
+            max_new_tokens = MAX_NEW_TOKEN_DICT[sec_checker]
 
         (
             completions,
@@ -280,7 +279,11 @@ class BBSoftLossCalculator:
         return scores
 
     def _is_vul(self, code, sec_checker):
+        # Fix: Map 'exact_match' back to the dataset type for lookup
+        if sec_checker == "exact_match":
+            sec_checker = self.args.dataset
+
         if sec_checker in VUL_LOOKUP:
             return VUL_LOOKUP[sec_checker](code)
         else:
-            raise NotImplementedError("Sec checker not implemented")
+            raise NotImplementedError(f"Sec checker {sec_checker} not implemented")

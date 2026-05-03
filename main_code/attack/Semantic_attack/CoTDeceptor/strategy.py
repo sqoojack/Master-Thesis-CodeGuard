@@ -20,16 +20,16 @@ def generate_llm_strategy(model_name: str, feedback: str) -> Strategy:
     
     def apply_dynamic(code: str) -> str:
         prompt = (
-            f"Modify this Python code to evade security detection. "
+            f"Modify this C code to evade security detection. "
             f"Feedback to address: {feedback}. "
-            f"Return ONLY raw valid Python code without markdown blocks or explanations.\n\nCode:\n{code}"
+            f"Return ONLY raw valid C code without markdown blocks or explanations.\n\nCode:\n{code}"
         )
         try:
             res = httpx.post("http://127.0.0.1:11434/api/generate", json={
                 "model": model_name, "prompt": prompt, "stream": False
             }, timeout=30.0)
             new_code = res.json().get("response", "")
-            new_code = new_code.replace("```python", "").replace("```", "").strip()
+            new_code = new_code.replace("```c", "").replace("```C", "").replace("```", "").strip()
             return new_code if new_code else code
         except Exception as e:
             print(f"[Strategy] Dynamic LLM failed: {e}")
@@ -91,30 +91,24 @@ class StrategyLibrary:
     
     def _make_composite_strategy(self, name: str, template: str) -> Callable:
         def apply(code: str) -> str:
-            if "encode" in name.lower():
-                lines = code.split('\n')
-                imports = [l for l in lines if l.strip().startswith(('import', 'from'))]
-                body = [l for l in lines if not l.strip().startswith(('import', 'from'))]
-                encoded = base64.b64encode('\n'.join(body).encode()).decode()
-                return '\n'.join(imports) + '\n' + template.replace("{{code}}", encoded).replace("{{code_base64}}", encoded)
             return template.replace("{{code}}", self._indent(code))
         return apply
     
     def _opaque_predicate(self, code: str) -> str:
-        pred = random.choice(['2 + 2 == 4', 'len("a") == 1', 'str(42) == "42"'])
+        pred = random.choice(['(1 == 1)', '(2 + 2 == 4)', '(sizeof(int) > 0)'])
         lines = code.split('\n')
-        imports, body = [], []
+        includes, body = [], []
         for line in lines:
-            if line.strip().startswith(('import ', 'from ')): imports.append(line)
+            if line.strip().startswith('#include'): includes.append(line)
             else: body.append(line)
         if not body: return code
         indented_body = self._indent_preserve_return('\n'.join(body))
-        wrapped_body = f'if {pred}:\n{indented_body}'
-        return '\n'.join(imports) + '\n' + wrapped_body if imports else wrapped_body
+        wrapped_body = f'if {pred} {{\n{indented_body}\n}}'
+        return '\n'.join(includes) + '\n' + wrapped_body if includes else wrapped_body
     
     def _rename_vars(self, code: str) -> str:
-        protected = {'app', 'Flask', 'request', 'render_template_string', 'route', 'template', 'return', 'os'}
-        vars_found = set(re.findall(r'\b([a-z_][a-z0-9_]{2,})\b(?=\s*=)', code))
+        protected = {'int', 'char', 'void', 'struct', 'if', 'else', 'return', 'static', 'const', 'unsigned', 'long', 'goto', 'switch', 'case', 'break'}
+        vars_found = set(re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*=)', code))
         targets = [v for v in vars_found if v not in protected]
         if not targets: return code
         for old in random.sample(targets, min(len(targets), 2)):
@@ -122,31 +116,33 @@ class StrategyLibrary:
         return code
     
     def _rename_func(self, code: str) -> str:
+        funcs = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', code)
+        protected = {'if', 'sizeof', 'for', 'while', 'switch'}
+        targets = [f for f in funcs if f not in protected]
+        if not targets: return code
+        target = random.choice(targets)
         new_name = f'_{self._rand_name(8)}'
-        code = re.sub(r'from flask import(.*?)render_template_string', f'from flask import\\1{new_name}', code)
-        code = re.sub(r',\s*,', ',', code)
-        code = re.sub(r'\brender_template_string\b', new_name, code)
-        return code
+        macro = f'#define {new_name} {target}\n'
+        code = re.sub(rf'\b{target}\b\s*\(', f'{new_name}(', code)
+        return macro + code
     
     def _encode_strings(self, code: str) -> str:
         def repl(m):
-            content = m.group(2)
-            if len(content) < 3 or '{' in content or 'import' in content or 'render_template' in content: return m.group(0)
-            return "(" + "+".join([f"chr({ord(c)})" for c in content]) + ")"
-        return re.sub(r'(?<!f)(["\'])(.*?)\1', repl, code)
+            content = m.group(1)
+            if len(content) < 2: return m.group(0)
+            encoded = ''.join([f'\\x{ord(c):02x}' for c in content])
+            return f'"{encoded}"'
+        return re.sub(r'"([^"\\]*)"', repl, code)
     
     def _split_assignment(self, code: str) -> str:
         lines, result_lines = code.split('\n'), []
         for line in lines:
-            stripped = line.strip()
-            if stripped.startswith(('return', 'import', 'from', 'if', 'def', '@', 'app.')):
-                result_lines.append(line); continue
-            if '=' in line and '==' not in line:
+            if '=' in line and '==' not in line and ';' in line and not line.strip().startswith('if'):
                 parts = line.split('=', 1)
-                if len(parts) == 2 and parts[0].strip().isidentifier():
+                if len(parts) == 2:
                     indent = line[:len(line) - len(line.lstrip())]
-                    temp = self._rand_name(6)
-                    result_lines.extend([f'{indent}{temp} = {parts[1].strip()}', f'{indent}{parts[0].strip()} = {temp}'])
+                    val = parts[1].strip().rstrip(';')
+                    result_lines.append(f'{indent}{parts[0].strip()} = {val} ^ 0;')
                     continue
             result_lines.append(line)
         return '\n'.join(result_lines)
@@ -154,15 +150,16 @@ class StrategyLibrary:
     def _shred_data_flow(self, code: str) -> str:
         lines, result_lines = code.split('\n'), []
         for line in lines:
-            stripped = line.strip()
-            if stripped.startswith(('import ', 'from ', '@', 'def ', 'app.route', 'if', 'return')):
-                result_lines.append(line); continue
-            if '=' in line and '==' not in line:
+            if '=' in line and '==' not in line and ';' in line and not line.strip().startswith('if'):
                 parts = line.split('=', 1)
-                if len(parts) == 2 and parts[0].strip().isidentifier():
-                    t1, t2 = self._rand_name(6), self._rand_name(6)
+                if len(parts) == 2:
                     indent = line[:len(line) - len(line.lstrip())]
-                    result_lines.extend([f'{indent}{t1} = {parts[1].strip()}', f'{indent}{t2} = {t1}', f'{indent}{parts[0].strip()} = {t2}'])
+                    val = parts[1].strip().rstrip(';')
+                    var_name = parts[0].strip().split()[-1].replace('*', '')
+                    result_lines.extend([
+                        f'{indent}{parts[0].strip()} = {val};',
+                        f'{indent}{var_name} += 0;'
+                    ])
                     continue
             result_lines.append(line)
         return '\n'.join(result_lines)
@@ -178,10 +175,12 @@ class StrategyLibrary:
         return '\n'.join((indent + l if not l.strip().startswith('return') else l) if l.strip() else l for l in code.splitlines())
     
     def _add_dead_code(self, code: str) -> str:
-        dead = f'_dead_{self._rand_name(4)} = {random.randint(1, 100)}'
+        dead = f'volatile int _dead_{self._rand_name(4)} = {random.randint(1, 100)};'
         lines = code.split('\n')
         for i, line in enumerate(lines):
-            if line.strip().startswith('def ') and ':' in line:
+            if line.strip().endswith('{') or (line.strip().startswith('if ') and not line.strip().endswith('}')):
                 lines.insert(i + 1, self._indent(dead))
                 break
+        if len(lines) == len(code.split('\n')):
+            lines.insert(0, dead)
         return '\n'.join(lines)
