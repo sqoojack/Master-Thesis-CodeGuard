@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 class PreFilter:
     def __init__(self, parser, language, lang_name="c", s1_word=200, s1_str=0.5, s1_other=0.4, s1_ascii=0.15):
@@ -32,7 +33,6 @@ class PreFilter:
         self.string_query = self.language.query("(string_literal) @string")
         self.identifier_query = self.language.query("(identifier) @identifier")
         self.error_query = self.language.query("(ERROR) @error")
-
         if self.lang_name == "java":
             self.comment_query = self.language.query("(line_comment) @comment (block_comment) @comment")
         else:
@@ -45,25 +45,32 @@ class PreFilter:
             
         # Skip comment nodes handled by Layer 3
         if node_type == 'comment':
-            non_ascii_count = sum(1 for c in text if ord(c) > 127)
-            # 如果註解中非 ASCII 比例過高，直接攔截
-            if non_ascii_count > 3 and (non_ascii_count / len(text)) > self.s1_ascii:
-                return True, "Comment_Abnormal_Non_ASCII"
+            # Check for hidden control characters instead of benign non-ASCII
+            control_chars = sum(1 for c in text if unicodedata.category(c).startswith('C') and c not in '\n\r\t')
+            if control_chars > 0:
+                return True, "Comment_Abnormal_Control_Chars"
             return False, None
-        
-        if node_type == 'identifier' and (text.startswith('_dead_') or len(text) > 20):
-            return True, f"Suspicious_Identifier ({text[:10]}...)"
+            
+        if node_type == 'identifier':
+            if text.startswith('_dead_'):
+                return True, f"Suspicious_Identifier ({text[:10]}...)"
+            
+            # Split by CamelCase or snake_case to find unbreakable obfuscated chunks
+            sub_words = re.split(r'_|(?=[A-Z])', text)
+            max_sub_len = max((len(w) for w in sub_words if w), default=0)
+            if max_sub_len > 25:
+                return True, f"Suspicious_Identifier ({text[:10]}...)"
             
         if node_type not in ['string_literal', 'string']:
             max_word_len = max((len(w) for w in text.split()), default=0)
             if max_word_len > self.s1_word:
                 return True, f"Long_Continuous_String ({max_word_len})"
-        
+                
         # Exclude Python docstrings and type hints in ERROR nodes
         if self.lang_name == "python" and node_type == "ERROR":
             if ">>>" in text or "->" in text:
                 return False, None
-            
+                
         # Separate common syntax chars from high-risk chars
         syntax_chars = set("{}[]()=><,.:-@")
         risk_chars = set("$|\\\"'`~^%;&")
@@ -77,19 +84,21 @@ class PreFilter:
         else:
             adjusted_special_count = (syntax_count * 0.5) + risk_count
             
-        special_ratio = adjusted_special_count / len(text)
+        # Apply Laplace smoothing to prevent short strings from dominating the ratio
+        smoothing_factor = 15.0
+        special_ratio = adjusted_special_count / (len(text) + smoothing_factor)
         threshold = self.s1_str if node_type in ['string_literal', 'string'] else self.s1_other
         
         if special_ratio > threshold:
             return True, f"High_Special_Char_Ratio ({special_ratio:.2f})"
             
-        # Check for abnormal non-ASCII characters
-        non_ascii_count = sum(1 for c in text if ord(c) > 127)
-        if non_ascii_count > 5 and (non_ascii_count / len(text)) > self.s1_ascii:
-            return True, "Abnormal_Non_ASCII_Ratio"
+        # Check for control characters in non-comments instead of pure non-ASCII
+        control_chars = sum(1 for c in text if unicodedata.category(c).startswith('C') and c not in '\n\r\t')
+        if control_chars > 0:
+            return True, "Abnormal_Control_Chars"
             
         return False, None
-    
+        
     def _detect_dead_decoys(self, tree, code_bytes):
         # 1. Define query for functions based on language
         if self.lang_name == "java":
@@ -98,13 +107,13 @@ class PreFilter:
             query_funcs_str = "(function_definition) @func"
         else:
             query_funcs_str = "(function_definition) @func"
-
+            
         try:
             query_funcs = self.language.query(query_funcs_str)
             func_captures = query_funcs.captures(tree.root_node)
         except Exception:
             func_captures = []
-
+            
         all_funcs = {}
         
         # Stopwords for shared identifier analysis to prevent false edges
@@ -115,18 +124,18 @@ class PreFilter:
             "calldata", "true", "false", "this", "balance", "transfer", 
             "send", "call", "length", "push", "return", "returns"
         }
-
+        
         # 2. Extract all functions and their local identifiers
         func_identifiers = {}
         query_idents = self.language.query("(identifier) @ident")
-
+        
         for node, _ in func_captures:
             name = ""
             for child in node.children:
                 if child.type in ["identifier", "name"]:
                     name = child.text.decode("utf-8", errors="ignore")
                     break
-            
+                    
             if name:
                 all_funcs[name] = node
                 
@@ -137,10 +146,10 @@ class PreFilter:
                     if ident_name not in solidity_keywords and ident_name != name:
                         idents.add(ident_name)
                 func_identifiers[name] = idents
-
+                
         if not all_funcs:
             return []
-
+            
         # 3. Build Adjacency List for the Interaction Graph
         # Edges are formed by either explicit function calls or shared state variables
         graph = {name: set() for name in all_funcs.keys()}
@@ -153,7 +162,7 @@ class PreFilter:
                 if c_name in all_funcs and c_name != name:
                     graph[name].add(c_name)
                     graph[c_name].add(name) # Undirected graph for connectivity
-
+                    
         # 3b. Add edges based on Shared State/Identifiers (State Coupling)
         func_names = list(all_funcs.keys())
         for i in range(len(func_names)):
@@ -163,11 +172,11 @@ class PreFilter:
                 if shared_vars:
                     graph[f1].add(f2)
                     graph[f2].add(f1)
-
+                    
         # 4. Find Connected Components using BFS
         visited = set()
         components = []
-
+        
         for name in all_funcs:
             if name not in visited:
                 comp = set()
@@ -182,10 +191,10 @@ class PreFilter:
                             visited.add(neighbor)
                             queue.append(neighbor)
                 components.append(comp)
-
+                
         if not components:
             return []
-
+            
         # 5. Identify the Main Component (usually the largest one or containing constructor)
         # Components disconnected from the main one are considered Dead Decoys
         main_component = max(components, key=len)
@@ -196,7 +205,7 @@ class PreFilter:
             if comp.intersection(core_funcs):
                 main_component = comp
                 break
-
+                
         decoys_found = []
         for comp in components:
             if comp != main_component:
@@ -206,7 +215,7 @@ class PreFilter:
                         "name": name,
                         "span": (node.start_byte, node.end_byte)
                     })
-
+                    
         return decoys_found
 
     def detect(self, code):
@@ -218,7 +227,7 @@ class PreFilter:
             tree = self.parser.parse(code_bytes)
         except Exception:
             return False, code, []
-
+            
         triggered = False
         debug_info = []
         
@@ -226,7 +235,7 @@ class PreFilter:
         for query in [self.string_query, self.comment_query, self.identifier_query, self.error_query]:
             for node, _ in query.captures(tree.root_node):
                 nodes_to_scan.append(node)
-
+                
         for node in nodes_to_scan:
             text = node.text.decode("utf8", errors="ignore")
             node_type = node.type
@@ -243,10 +252,10 @@ class PreFilter:
                         "span": (node.start_byte, node.end_byte)
                     })
                     break
-            
+                    
             if matched_regex:
                 continue
-
+                
             is_anomalous, anomaly_type = self._check_structural_anomaly(text, node_type)
             if is_anomalous:
                 triggered = True
@@ -256,7 +265,7 @@ class PreFilter:
                     "matched_text": text[:50].replace('\n', ' '),
                     "span": (node.start_byte, node.end_byte)
                 })
-
+                
         decoys = self._detect_dead_decoys(tree, code_bytes)
         if decoys:
             triggered = True
@@ -267,7 +276,7 @@ class PreFilter:
                     "matched_text": f"Function: {d['name']}",
                     "span": d['span']
                 })
-
+                
         repaired_code = code
         if triggered:
             replacements = sorted({(d["span"][0], d["span"][1]) for d in debug_info}, key=lambda x: x[0], reverse=True)
@@ -275,5 +284,5 @@ class PreFilter:
             for start, end in replacements:
                 new_code_bytes[start:end] = b"[FILTERED_BY_STAGE_1]"
             repaired_code = new_code_bytes.decode("utf8", errors="ignore")
-
+            
         return triggered, repaired_code, debug_info

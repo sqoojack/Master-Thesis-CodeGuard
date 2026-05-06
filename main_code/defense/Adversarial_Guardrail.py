@@ -12,7 +12,6 @@ class AdversarialGuardrail:
         
         self.adversarial_threshold = args.adversarial_threshold
         self.th_string = args.th_string
-
         self.docstring_keywords = [
             '>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 
             'Given a', 'For a', 'Calculate', 'is a palindrome',
@@ -28,8 +27,7 @@ class AdversarialGuardrail:
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.detach().cpu().to(torch.float32).numpy()
 
-    def calc_mink_score(self, text, k=None): 
-        # Calculate Min-k% score
+    def calc_mink_score(self, text, node_type=None, k=None):
         if not text or len(text) < 10: 
             return 0.0
             
@@ -39,36 +37,40 @@ class AdversarialGuardrail:
         if token_count < 5: 
             return 0.0
             
-        if k is None:
-            if token_count < 20:
-                dynamic_k = 0.8
-            elif token_count < 50:
-                dynamic_k = 0.5
-            elif token_count < 200:
-                dynamic_k = 0.3
-            else:
-                dynamic_k = 0.1
-        else:
-            dynamic_k = k
-            
         losses = self.get_token_losses(inputs["input_ids"])
         if len(losses) == 0: 
             return 0.0
+
+        if k is None:
+            centers = {'identifier': 10, 'string': 40, 'comment': 60}
+            center = centers.get(node_type, 50)
             
-        # Calculate original Min-K%
+            base_k = 0.1 + (0.8 / (1.0 + np.exp(0.05 * (token_count - center))))
+            
+            exp_losses = np.exp(-losses + np.max(-losses))
+            probs = exp_losses / np.sum(exp_losses)
+            entropy = -np.sum(probs * np.log(probs + 1e-10))
+            max_entropy = np.log(len(losses))
+            rel_entropy = entropy / max_entropy if max_entropy > 0 else 1.0
+            
+            dynamic_k = np.clip(base_k * rel_entropy, 0.05, 0.9)
+        else:
+            dynamic_k = k
+            
         sorted_losses = np.sort(losses)[::-1]
         num_tokens_to_keep = max(1, int(len(losses) * dynamic_k))
         top_k_losses = sorted_losses[:num_tokens_to_keep]
         mink_loss = np.mean(top_k_losses)
         
-        # New logic: Burst detection via Sliding Window
-        window_size = 5
-        if len(losses) >= window_size:
-            # Calculate max moving average of losses
-            max_window_loss = max([np.mean(losses[i:i+window_size]) for i in range(len(losses)-window_size+1)])
-            # Use a weighted maximum to balance global and local anomalies
-            # 0.8 is a sensitivity factor you can tune
-            return max(mink_loss, max_window_loss * 0.8) 
+        loss_diffs = np.abs(np.diff(losses))
+        max_spike = np.max(loss_diffs) if len(loss_diffs) > 0 else 0.0
+        
+        window_size = min(5, len(losses))
+        if window_size > 0:
+            weights = np.exp(np.linspace(-1, 0, window_size))
+            weights /= weights.sum()
+            max_window_loss = max([np.average(losses[i:i+window_size], weights=weights) for i in range(len(losses)-window_size+1)])
+            return max(mink_loss, max_window_loss * 0.85 + max_spike * 0.1)
             
         return mink_loss
 
@@ -84,11 +86,9 @@ class AdversarialGuardrail:
         except Exception as e:
             return False, code, []
 
-        # Fix TS query for python string nodes
         comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
         string_node = "(string) @string" if self.lang_name == "python" else "(string_literal) @string"
         query_str = f"{comment_node} {string_node} (identifier) @identifier"
-
         query = self.language.query(query_str)
         captures = query.captures(tree.root_node)
         
@@ -96,16 +96,13 @@ class AdversarialGuardrail:
         triggered = False
         adv_debug = [] 
         
-        # Target tokens that lower loss maliciously
         special_tokens = ['<|', '|>', '<EOL>', '<s>', '</s>']
 
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
-            
-            if len(text) < 10: 
-                continue 
+            if len(text) < 10: continue
 
-            score = self.calc_mink_score(text, k=None)
+            score = self.calc_mink_score(text, node_type=type_name)
             
             current_threshold = self.adversarial_threshold
             string_th = self.th_string
@@ -115,25 +112,23 @@ class AdversarialGuardrail:
                 length_penalty = 2.0 * (1.0 - (len(text) / 40.0))
                 current_threshold += length_penalty
             
-            # Allow whitelisted modifiers for both docstrings and comments
             if whitelisted:
                 current_threshold *= 1.5 
                 string_th *= 1.5
                 
-            # Penalize injected tokens to prevent evasion
             if any(t in text for t in special_tokens) or '\r' in text:
                 score += 10.0
-            
+                
             is_this_triggered = False
             if type_name == 'comment' and score > current_threshold:
                 is_this_triggered = True
-                replacements.append((node.start_byte, node.end_byte, b"")) # Prune comment
+                replacements.append((node.start_byte, node.end_byte, b""))
             elif type_name == 'string' and score > string_th:
                 is_this_triggered = True
-                replacements.append((node.start_byte, node.end_byte, b'""')) # Neutralize string
+                replacements.append((node.start_byte, node.end_byte, b'""'))
             elif type_name == 'identifier' and score > current_threshold:
                 is_this_triggered = True
-                replacements.append((node.start_byte, node.end_byte, b"")) # Prune identifier
+                replacements.append((node.start_byte, node.end_byte, b""))
 
             if is_this_triggered:
                 triggered = True
@@ -144,7 +139,7 @@ class AdversarialGuardrail:
                     "whitelisted": whitelisted,
                     "text_snippet": text[:50].replace('\n', ' ')
                 })
-        
+
         if not replacements:
             return False, code, []
 
@@ -155,5 +150,5 @@ class AdversarialGuardrail:
                 del new_code_bytes[start:end]
             else:
                 new_code_bytes[start:end] = rep_bytes
-            
+                
         return triggered, new_code_bytes.decode("utf8", errors='ignore'), adv_debug

@@ -1,0 +1,81 @@
+_wandb:
+    value:
+        cli_version: 0.26.1
+        e:
+            ywfqsdly86ukrdivtd1nfvcxtal3eocx:
+                codePath: main_code/attack/Adversarial_attack/INSEC/main.py
+                codePathLocal: main.py
+                cpu_count: 16
+                cpu_count_logical: 32
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "3936290357248"
+                        used: "3531921850368"
+                email: jack90213@gmail.com
+                executable: /home/jack/anaconda3/envs/Thesis/bin/python
+                git:
+                    commit: 502114755369d45a3ef324453237e129835cf11a
+                    remote: https://github.com/sqoojack/Master-Thesis-CodeGuard.git
+                gpu: NVIDIA GeForce RTX 4090
+                gpu_count: 2
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 16384
+                      memoryTotal: "25757220864"
+                      name: NVIDIA GeForce RTX 4090
+                      uuid: GPU-195dc047-c39f-ae87-57ab-7c61b49cdad9
+                    - architecture: Ada
+                      cudaCores: 16384
+                      memoryTotal: "25757220864"
+                      name: NVIDIA GeForce RTX 4090
+                      uuid: GPU-6958e318-1d39-7e14-466d-a4e3b8e6558c
+                host: HSNL
+                memory:
+                    total: "134551302144"
+                os: Linux-6.8.0-110-generic-x86_64-with-glibc2.35
+                program: /home/jack/Thesis_topic/main_code/attack/Adversarial_attack/INSEC/main.py
+                python: CPython 3.12.12
+                root: /home/jack/Thesis_topic/main_code/attack/Adversarial_attack/INSEC
+                startedAt: "2026-05-03T04:28:29.814322Z"
+                writerId: ywfqsdly86ukrdivtd1nfvcxtal3eocx
+        m: []
+        python_version: 3.12.12
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 95
+            "2":
+                - 1
+                - 5
+                - 11
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 95
+            "3":
+                - 13
+                - 16
+                - 24
+            "4": 3.12.12
+            "5": 0.26.1
+            "6": 5.7.0
+            "12": 0.26.1
+            "13": linux-x86_64
+dataset:
+    value: cwe-078_py
+experiment_name:
+    value: insec_repro
+model_dir:
+    value: bigcode/starcoderbase-3b
+output_dir:
+    value: ./outputs

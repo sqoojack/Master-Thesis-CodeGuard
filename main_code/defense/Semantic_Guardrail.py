@@ -33,8 +33,8 @@ class SemanticGuardrail:
         
         self.noise_prefixes = ('trace_', 'debug_', 'test_', 'assert_', 'sys_', 'standard_', 'std_', 'av_', 'ff_')
         self.noise_suffixes = ('_init', '_exit', '_free', '_alloc', '_create', '_destroy', 
-                                '_tab', '_table', '_list', '_queue', '_desc', '_info', '_data', 
-                                '_ops', '_cb', '_ctx', '_t', '_s', '_eq', '_ne', '_impl', '_handler')
+                               '_tab', '_table', '_list', '_queue', '_desc', '_info', '_data', 
+                               '_ops', '_cb', '_ctx', '_t', '_s', '_eq', '_ne', '_impl', '_handler')
 
     def get_token_losses(self, input_ids):
         with torch.no_grad():
@@ -57,24 +57,28 @@ class SemanticGuardrail:
         local_prefix = prefix[-self.prefix_window:] if len(prefix) > self.prefix_window else prefix
         
         suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
-        eval_suffix = suffix[:self.suffix_window] 
+        eval_suffix = suffix[:self.suffix_window]
+
         if len(eval_suffix) < 10: return 0.0
         
         text_orig = local_prefix + target_text + eval_suffix
         
         if node_type == 'comment':
-            neutral_repl = "//" if target_text.startswith("//") else "/* */"
+            neutral_repls = ["//", "/* NA */"] if target_text.startswith("//") else ["/* */", "/* NA */"]
         elif node_type == 'string':
-            neutral_repl = '""'
+            neutral_repls = ['""', '"none"']
         else: 
-            neutral_repl = "VAR_0"
+            neutral_repls = ["VAR", "TMP", "IDX"]
             
-        text_neutral = local_prefix + neutral_repl + eval_suffix
-        
+        baseline_losses = []
+        for repl in neutral_repls:
+            text_neutral = local_prefix + repl + eval_suffix
+            inputs = self.tokenizer(text_neutral, return_tensors="pt").to(self.device)["input_ids"]
+            baseline_losses.append(np.mean(self.get_token_losses(inputs)))
+            
         loss_orig = np.mean(self.get_token_losses(self.tokenizer(text_orig, return_tensors="pt").to(self.device)["input_ids"]))
-        loss_neutral = np.mean(self.get_token_losses(self.tokenizer(text_neutral, return_tensors="pt").to(self.device)["input_ids"]))
         
-        return loss_orig - loss_neutral
+        return loss_orig - np.mean(baseline_losses)
 
     def is_noisy_variable(self, text):
         if text.startswith(self.noise_prefixes): return True
@@ -82,7 +86,8 @@ class SemanticGuardrail:
         return False
 
     def get_token_type(self, code_bytes, node, text):
-        if text.isupper(): return 'MACRO' 
+        if text.isupper(): return 'MACRO'
+        
         end_byte = node.end_byte
         next_bytes = code_bytes[end_byte:end_byte+10].strip()
         if next_bytes.startswith(b'('): 
@@ -90,10 +95,8 @@ class SemanticGuardrail:
         return 'NORMAL'
 
     def calculate_dynamic_factor(self, token_type, is_noisy, node_len, local_z_score=0.0):
-        # Base factor is neutral
         factor = 1.0
         
-        # Apply continuous logarithmic scaling for strings and comments
         if token_type in ('STRING', 'COMMENT'):
             factor += math.log1p(max(0, node_len)) / 10.0
         elif token_type in ('FUNC', 'MACRO'):
@@ -102,7 +105,6 @@ class SemanticGuardrail:
         if is_noisy: 
             factor *= 0.8
             
-        # Adjust factor based on local z-score (outliers get lower thresholds)
         if local_z_score > 0:
             factor *= max(0.5, 1.0 - (local_z_score * 0.1))
             
@@ -113,9 +115,11 @@ class SemanticGuardrail:
         
         code_bytes = bytes(code, "utf8")
         max_len = min(self.tokenizer.model_max_length, 2048)
+
         inputs = self.tokenizer(code, return_tensors="pt", truncation=True, max_length=max_len, return_offsets_mapping=True)
         input_ids = inputs["input_ids"].to(self.device)
         offsets = inputs["offset_mapping"][0].cpu().numpy()
+
         ctx_losses = self.get_token_losses(input_ids)
 
         try:
@@ -139,7 +143,7 @@ class SemanticGuardrail:
                 if len(text) < 10: continue
                 is_noisy = False
                 token_type = type_name.upper()
-            
+                
             var_ranges.append({
                 'start': node.start_byte, 
                 'end': node.end_byte, 
@@ -154,11 +158,13 @@ class SemanticGuardrail:
         valid_var_ranges = [v for v in var_ranges if v['end'] <= last_byte_covered]
 
         var_ctx_map = defaultdict(list)
-        var_meta_map = {} 
+        var_meta_map = {}
+        
         for i, loss in enumerate(ctx_losses):
             token_idx = i + 1
             if token_idx >= len(offsets): break
             start_off, end_off = offsets[token_idx]
+
             for v_info in valid_var_ranges:
                 if not (end_off <= v_info['start'] or start_off >= v_info['end']):
                     node_key = (v_info['start'], v_info['end'], v_info['text'])
@@ -173,6 +179,7 @@ class SemanticGuardrail:
                 var_text = node_key[2]
                 prior = self.get_prior_loss(var_text)
                 if prior is None: continue
+
                 surprise_score = max(0.0, max_ctx - prior)
                 candidates.append({
                     'var': var_text, 
@@ -231,6 +238,7 @@ class SemanticGuardrail:
                 "surprise": cand['surprise_score'],
                 "factor": factor
             })
+
         return features
 
     def detect(self, code):
@@ -260,12 +268,11 @@ class SemanticGuardrail:
             dynamic_threshold = max(min_threshold, (self.base_influence_th * factor) / (1.0 + (surprise * self.surprise_tolerance)))
             
             triggered = False
-            # Trigger if influence breaches the dynamic threshold or acts as an extreme outlier
             if influence > dynamic_threshold or z_score > 3.0:
                 triggered = True
                 toxic_nodes.append(meta)
                 is_attack = True
-            
+                
             debug_info.append({
                 "var": var[:50].replace('\n', ' '), 
                 "surprise": surprise,
@@ -281,12 +288,13 @@ class SemanticGuardrail:
         if is_attack:
             toxic_nodes.sort(key=lambda x: x['start'], reverse=True)
             new_code_bytes = bytearray(code_bytes)
+
             for meta in toxic_nodes:
                 if meta['node_type'] == 'string':
                     new_code_bytes[meta['start']:meta['end']] = b'""'
                 else:
                     del new_code_bytes[meta['start']:meta['end']]
-            
+                    
             repaired_code = new_code_bytes.decode("utf8", errors="ignore")
 
         return is_attack, repaired_code, debug_info

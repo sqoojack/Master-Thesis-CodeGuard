@@ -1,16 +1,20 @@
 """
-    ----------------------------------- Multiple Attack Types ------------------------------
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type ShadowCode INSEC XOXO -n 400
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type INSEC -n 400
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type  -n 400
-    ----------------------------------- Merged_dataset ------------------------------
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type merged -n 400
-    python main_code/defense/dynamic_threshold.py -attack_type merged -n 200 --model_id Qwen/Qwen3.5-4B
-    ----------------------------------- Adaptive Attack ------------------------------
-    python main_code/defense/dynamic_threshold.py -attack_type adaptive_decoys -n 200
-    ----------------------------------- CoTDeceptor ------------------------------
-    CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type CoTDeceptor -n 200 --model_id Salesforce/codegen-350M-multi
+----------------------------------- Multiple Attack Types ------------------------------
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type ShadowCode INSEC XOXO -n 400
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type XOXO -n 400
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type  -n 400
+
+----------------------------------- Merged_dataset ------------------------------
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type merged -n 400
+python main_code/defense/dynamic_threshold.py -attack_type merged -n 200 --model_id Qwen/Qwen3.5-4B
+
+----------------------------------- Adaptive Attack ------------------------------
+python main_code/defense/dynamic_threshold.py -attack_type adaptive_decoys -n 200
+
+----------------------------------- CoTDeceptor ------------------------------
+CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type CoTDeceptor -n 200 --model_id Salesforce/codegen-350M-multi
 """
+
 import os
 import json
 import argparse
@@ -22,15 +26,15 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from tree_sitter import Language, Parser
 from collections import defaultdict
 import random
+import re
+import filelock
+from typing import Dict, List, Any, Optional
 
 from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
 
-import re
-import filelock
-
-def set_seed(seed=42):
+def set_seed(seed: int = 42) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -38,69 +42,70 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def clean_dataset_metadata(code_text):
+def clean_dataset_metadata(code_text: str) -> str:
     if not code_text:
         return ""
-    
+        
     cleaned_code = re.sub(r'//\s*<(yes|no)>\s*<report>.*', '', code_text, flags=re.IGNORECASE)
     cleaned_code = re.sub(r'/\*[\s\S]*?@(source|article|vulnerable_at_lines):[\s\S]*?\*/', '', cleaned_code)
     
     return cleaned_code
 
-def setup_tree_sitter(lang_name):
+def setup_tree_sitter(lang_name: str) -> Language:
     ts_dir = "build"
     repo_name = f"tree-sitter-{lang_name}"
     repo_dir = os.path.join(ts_dir, repo_name)
     lib_path = os.path.join(ts_dir, f"{lang_name}.so")
-
+    
     repo_map = {
         "solidity": "https://github.com/JoranHonig/tree-sitter-solidity",
         "java": "https://github.com/tree-sitter/tree-sitter-java",
         "c": "https://github.com/tree-sitter/tree-sitter-c",
-        "python": "https://github.com/tree-sitter/tree-sitter-python"
+        "python": "https://github.com/tree-sitter/tree-sitter-python",
+        "cpp": "https://github.com/tree-sitter/tree-sitter-cpp"
     }
-    repo_url = repo_map.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
-
-    if not os.path.exists(ts_dir): 
-        os.makedirs(ts_dir)
     
+    repo_url = repo_map.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
+    
+    if not os.path.exists(ts_dir):
+        os.makedirs(ts_dir)
+        
     lock = filelock.FileLock(f"{lib_path}.lock")
     with lock:
         if not os.path.exists(repo_dir):
             os.system(f"git clone {repo_url} {repo_dir}")
         if not os.path.exists(lib_path):
             Language.build_library(lib_path, [repo_dir])
-    
-    if lang_name.lower() == "solidity" and not os.path.exists(lib_path):
-        os.system(f"cd {repo_dir} && git checkout $(git rev-list -n 1 --before='2023-10-01' master)")
-        
-    if not os.path.exists(lib_path): 
-        Language.build_library(lib_path, [repo_dir])
-
+            
+        if lang_name.lower() == "solidity" and not os.path.exists(lib_path):
+            os.system(f"cd {repo_dir} && git checkout $(git rev-list -n 1 --before='2023-10-01' master)")
+            
+        if not os.path.exists(lib_path):
+            Language.build_library(lib_path, [repo_dir])
+            
     return Language(lib_path, lang_name)
 
-def detect_language(code_snippet):
+def detect_language(code_snippet: str) -> str:
     if not code_snippet:
         return "c"
-    
+        
     code_lower = code_snippet.lower()
     
     if "pragma solidity" in code_lower or "contract " in code_lower:
         return "solidity"
-    
     if "public class " in code_lower or "import java." in code_lower or "system.out." in code_lower:
         return "java"
-
     if "def " in code_lower or "elif " in code_lower or "import " in code_lower and "java" not in code_lower:
         return "python"
-    
+    if "std::" in code_lower or "#include <iostream>" in code_lower or "namespace " in code_lower:
+        return "cpp"
     if "#include" in code_lower or "printf(" in code_lower or "->_ops" in code_lower:
         return "c"
-    
-    return "c" 
+        
+    return "c"
 
 class DummyArgs:
-    def __init__(self, batch_size, lang="c"):
+    def __init__(self, batch_size: int, lang: str = "c"):
         self.adversarial_threshold = 999.0
         self.th_string = 999.0
         self.l3_base_influence = 999.0
@@ -108,25 +113,26 @@ class DummyArgs:
         self.batch_size = batch_size
         self.lang = lang
 
-def objective_function(tp, fp, fn, tn, beta=1.5):
+def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5) -> float:
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     
-    if (precision + recall) == 0: 
+    if (precision + recall) == 0:
         f_beta = 0
     else:
         f_beta = (1 + beta**2) * (precision * recall) / ((beta**2 * precision) + recall)
-    
+        
     fpr = fp / (fp + tn) if (tn + fp) > 0 else 0
     max_allowed_fpr = 0.1
+    
     if fpr > max_allowed_fpr:
         penalty = np.exp(-10 * (fpr - max_allowed_fpr))
     else:
         penalty = 1.0
-    
+        
     return f_beta * penalty
 
-def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, args, debug=False):
+def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGuardrail, sem_guard: SemanticGuardrail, parser: Parser, language: Language, args: DummyArgs, debug: bool = False) -> Dict[str, Any]:
     features = {
         "regex_triggered": False,
         "s1_max_word": 0,
@@ -139,58 +145,66 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
         "full_code": code if code else ""
     }
     
-    if not code: 
+    if not code:
         return features
-    
+        
     code_bytes = bytes(code, "utf8")
     try:
         tree = parser.parse(code_bytes)
     except Exception:
         return features
-
+        
     nodes_to_scan = []
     for query in [pre_filter.string_query, pre_filter.comment_query, pre_filter.identifier_query, pre_filter.error_query]:
         for node, _ in query.captures(tree.root_node):
             nodes_to_scan.append(node)
-
+            
+    # Call detect() from pre_filter to align with main.py
+    detected, repaired_code, debug_info = pre_filter.detect(code)
     regex_hit = False
+    for d in debug_info:
+        if "Regex_Match" in d["type"] or "Flashboom_Decoy" in d["type"] or "Suspicious_Identifier" in d["type"] or "Comment_Abnormal" in d["type"]:
+            regex_hit = True
+            
     max_word = 0
     max_spec_str = 0.0
     max_spec_other = 0.0
     max_non_ascii = 0.0
-
+    
     for node in nodes_to_scan:
         text = node.text.decode("utf8", errors="ignore")
         node_type = node.type
         
-        for pattern in pre_filter.string_patterns.values():
-            if pattern.search(text):
-                regex_hit = True
-                break
-                
         if len(text) >= 15 and node_type != 'comment':
             if node_type not in ['string_literal', 'string']:
                 w_len = max((len(w) for w in text.split()), default=0)
                 max_word = max(max_word, w_len)
+                
+            # Calculate syntax and risk characters to match pre_filter.py
+            syntax_chars = set("{}[]()=><,.:-@")
+            risk_chars = set("$|\\\"'`~^%;&")
             
-            special_chars = set("{}[]()=><$|\\\"'`~^")
-            spec_count = sum(1 for c in text if c in special_chars)
-            spec_ratio = spec_count / len(text)
+            syntax_count = sum(1 for c in text if c in syntax_chars)
+            risk_count = sum(1 for c in text if c in risk_chars)
             
             if node_type in ['string_literal', 'string']:
+                adjusted_special_count = (syntax_count * 0.5) + risk_count
+                spec_ratio = adjusted_special_count / len(text)
                 max_spec_str = max(max_spec_str, spec_ratio)
             else:
+                adjusted_special_count = (syntax_count * 0.1) + risk_count
+                spec_ratio = adjusted_special_count / len(text)
                 max_spec_other = max(max_spec_other, spec_ratio)
                 
             non_ascii_count = sum(1 for c in text if ord(c) > 127)
             if non_ascii_count > 5:
                 max_non_ascii = max(max_non_ascii, non_ascii_count / len(text))
-
-    decoys = pre_filter._detect_dead_decoys(tree, code_bytes)
-    if decoys:
-        regex_hit = True
-    
+                
     features["regex_triggered"] = regex_hit
+    features["s1_max_word"] = max_word
+    features["s1_spec_str"] = max_spec_str
+    features["s1_spec_other"] = max_spec_other
+    features["s1_non_ascii"] = max_non_ascii
 
     lang_name = getattr(pre_filter, 'lang_name', 'c')
     comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
@@ -202,10 +216,15 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
     
     for node, type_name in captures_adv:
         text = node.text.decode("utf8", errors='ignore')
-        if len(text) < 10: 
+        if len(text) < 10:
             continue
+            
         
-        score = adv_guard.calc_mink_score(text[:3000], k=0.5)
+        score = adv_guard.calc_mink_score(
+            text[:3000], 
+            node_type=type_name, 
+            k=None  
+        )
         whitelisted = adv_guard.is_whitelisted(text)
         
         length_penalty = 0.0
@@ -219,12 +238,11 @@ def extract_features(code, pre_filter, adv_guard, sem_guard, parser, language, a
             "length_penalty": float(length_penalty),
             "whitelisted": whitelisted
         })
-    
+        
     features["sem_features"] = sem_guard.extract_semantic_features(code)
-
     return features
 
-def prepare_vector_data(extracted_data):
+def prepare_vector_data(extracted_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     n = len(extracted_data)
     labels = np.array([item["label"] for item in extracted_data], dtype=np.int32)
     
@@ -233,11 +251,11 @@ def prepare_vector_data(extracted_data):
     s1_spec_str = np.array([item.get("s1_spec_str", 0.0) for item in extracted_data], dtype=np.float32)
     s1_spec_other = np.array([item.get("s1_spec_other", 0.0) for item in extracted_data], dtype=np.float32)
     s1_non_ascii = np.array([item.get("s1_non_ascii", 0.0) for item in extracted_data], dtype=np.float32)
-
+    
     adv_comment_max = np.full(n, -999.0)
     adv_string_max = np.full(n, -999.0)
     adv_id_max = np.full(n, -999.0)
-
+    
     for i, item in enumerate(extracted_data):
         for f in item.get("adv_features", []):
             score = f["score"]
@@ -249,12 +267,12 @@ def prepare_vector_data(extracted_data):
                 adv_string_max[i] = max(adv_string_max[i], score)
             elif f["type"] == 'identifier':
                 adv_id_max[i] = max(adv_id_max[i], score)
-
+                
     sem_sample_indices = []
     sem_influences = []
     sem_surprises = []
-    sem_factors = [] 
-
+    sem_factors = []
+    
     for i, item in enumerate(extracted_data):
         for f in item.get("sem_features", []):
             factor = f.get("factor", 1.0)
@@ -262,7 +280,7 @@ def prepare_vector_data(extracted_data):
             sem_influences.append(f["influence"])
             sem_surprises.append(f["surprise"])
             sem_factors.append(factor)
-
+            
     return {
         "labels": labels,
         "s1_regex": regex_triggered,
@@ -281,7 +299,7 @@ def prepare_vector_data(extracted_data):
         }
     }
 
-def simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, t_l3, th_s1_w, th_s1_s, th_s1_o, th_s1_a):
+def simulate_pipeline_vectorized(v_data: Dict[str, Any], th_adv: float, th_str: float, th_l3: float, t_l3: float, th_s1_w: int, th_s1_s: float, th_s1_o: float, th_s1_a: float) -> Dict[str, int]:
     n = len(v_data["labels"])
     y_true = v_data["labels"]
     
@@ -290,24 +308,25 @@ def simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, t_l3, th_s1_w, t
              (v_data["s1_spec_str"] > th_s1_s) | \
              (v_data["s1_spec_other"] > th_s1_o) | \
              (v_data["s1_non_ascii"] > th_s1_a)
-
+             
     s2_det = (v_data["adv_comment_max"] > th_adv) | \
              (v_data["adv_string_max"] > th_str) | \
              (v_data["adv_id_max"] > th_adv)
-
+             
     sem = v_data["sem"]
     s3_det = np.zeros(n, dtype=bool)
+    
     if len(sem["indices"]) > 0:
         dyn_thresholds = (th_l3 * sem["factor"]) / (1.0 + (sem["surprise"] * t_l3))
         triggered_nodes = sem["influence"] > dyn_thresholds
         
         sem_triggered_counts = np.bincount(
-            sem["indices"], 
-            weights=triggered_nodes.astype(np.int32), 
+            sem["indices"],
+            weights=triggered_nodes.astype(np.int32),
             minlength=n
         )
         s3_det = (sem_triggered_counts > 0)
-
+        
     is_detected_union = s1_det | s2_det | s3_det
     
     s1_tp = np.sum((s1_det == True) & (y_true == 1))
@@ -331,7 +350,7 @@ def simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, t_l3, th_s1_w, t
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-attack_type", "--attack_type", nargs='+', type=str, required=True, help="List of attack types to process (e.g., ShadowCode INSEC)")
+    parser.add_argument("-attack_type", "--attack_type", nargs='+', type=str, required=True, help="List of attack types to process")
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
     parser.add_argument("-n", "--num_samples", type=int, default=300)
     parser.add_argument("-bs", "--batch_size", type=int, default=16)
@@ -340,25 +359,25 @@ def main():
     parser.add_argument("--default_lang", type=str, default="c")
     parser.add_argument("--debug_limit", type=int, default=3)
     args_cmd = parser.parse_args()
-
+    
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     print(f"[-] Load model: {args_cmd.model_id}...")
     set_seed(42)
     tokenizer = AutoTokenizer.from_pretrained(args_cmd.model_id)
-    if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(args_cmd.model_id, torch_dtype=torch.float16).to(device)
     model.eval()
-
-    supported_langs = ["c", "java", "solidity", "python"]
+    
+    supported_langs = ["c", "java", "solidity", "python", "cpp"]
     guardrails = {}
-
+    
     for lang in supported_langs:
         try:
             target_language = setup_tree_sitter(lang)
             ts_parser = Parser()
             ts_parser.set_language(target_language)
-
             args_dummy = DummyArgs(args_cmd.batch_size, lang)
             guardrails[lang] = {
                 "pre_filter": PreFilter(ts_parser, target_language, lang_name=lang),
@@ -370,12 +389,11 @@ def main():
             }
         except Exception as e:
             print(f"[!] Failed to setup for {lang}: {e}")
-
-    # Map available attack types to their corresponding paths
+            
     DATASET_PATHS = {
         "shadowcode": "Dataset/ShadowCode/shadowcode_dataset.jsonl",
         "insec": "Dataset/INSEC/INSEC_dataset.jsonl",
-        "xoxo": "Dataset/XOXO_attack/XOXO_dataset.jsonl",
+        "xoxo": "Dataset/XOXO/XOXO_dataset.jsonl",
         "cotdeceptor": "Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl",
         "flashboom": "Dataset/Flashboom/flashboom_dataset.jsonl",
         "itgen": "Dataset/ITGen/itgen_dataset.jsonl",
@@ -384,7 +402,7 @@ def main():
         "adaptive_contextual": "Dataset/Adaptive_attack/contextual_attack.jsonl",
         "merged": "Dataset/merged_all/tiny_merged_dataset.jsonl"
     }
-
+    
     files_to_load = set()
     for atype in args_cmd.attack_type:
         key = atype.lower()
@@ -392,11 +410,11 @@ def main():
             files_to_load.add(DATASET_PATHS[key])
         else:
             print(f"[!] Warning: Unmapped attack type '{atype}'. Proceeding with available files.")
-
+            
     if not files_to_load:
         print("[!] No valid dataset paths found for the requested attack types. Exiting.")
         return
-
+        
     grouped_entries = defaultdict(list)
     
     for file_path in files_to_load:
@@ -413,19 +431,17 @@ def main():
                     lang = entry.get("language", entry.get("lang", ""))
                     code = entry.get("code", "")
                     adv_code = entry.get("adv_code", "")
-
                     if code and adv_code:
                         clean_code = clean_dataset_metadata(code)
                         clean_adv = clean_dataset_metadata(adv_code)
                         attack_type = entry.get("dataset_source", "unknown")
-
                         grouped_entries[attack_type].append({
                             "benign": {"code": clean_code, "lang": lang},
                             "adv": {"code": clean_adv, "lang": lang}
                         })
-                except Exception: 
+                except Exception:
                     pass
-            
+                    
     for atype in grouped_entries:
         random.shuffle(grouped_entries[atype])
         
@@ -441,7 +457,7 @@ def main():
                     break
             else:
                 active_groups.remove(atype)
-
+                
     print(f"[-] Selected {len(selected_pairs)} pairs ({len(selected_pairs)*2} samples) from {len(grouped_entries.keys())} attack types.")
     
     extracted_data = []
@@ -452,7 +468,6 @@ def main():
         lang = lang.lower()
         if lang not in supported_langs:
             lang = args_cmd.default_lang
-
         g = guardrails.get(lang, guardrails[args_cmd.default_lang])
         feat = extract_features(code, g["pre_filter"], g["adv_guard"], g["sem_guard"], g["parser"], g["language"], g["args_dummy"], debug=(i < args_cmd.debug_limit))
         feat["label"] = 0
@@ -464,37 +479,34 @@ def main():
         lang = lang.lower()
         if lang not in supported_langs:
             lang = args_cmd.default_lang
-
         g = guardrails.get(lang, guardrails[args_cmd.default_lang])
         feat = extract_features(code, g["pre_filter"], g["adv_guard"], g["sem_guard"], g["parser"], g["language"], g["args_dummy"], debug=(i < args_cmd.debug_limit))
         feat["label"] = 1
         extracted_data.append(feat)
-
+        
     v_data = prepare_vector_data(extracted_data)
-
     print(f"\n[-] Start Grid Search (Beta={args_cmd.beta}, Max FPR={args_cmd.max_fpr})...")
     
     s1_w_space = [50, 100, 150, 200]
-    s1_s_space = [0.2, 0.4, 0.8]
-    s1_o_space = [0.1, 0.3, 0.7]
-    s1_a_space = [0.05, 0.40, 0.60, 0.80]
+    s1_s_space = [0.05, 0.1, 0.2, 0.4]
+    s1_o_space = [0.1, 0.3, 0.5]
+    s1_a_space = [0.001, 0.05, 0.40, 0.60, 0.80]
     
-    adv_th_space = np.arange(1.0, 15.0, 1.0)
-    str_th_space = np.arange(1.0, 15.0, 1.0)
+    adv_th_space = np.arange(5.0, 20.0, 1.0)
+    str_th_space = np.arange(5.0, 20.0, 1.0)
     l3_th_space = np.arange(0.010, 0.300, 0.05)
-    l3_tolerance_space = [0.01, 0.10, 0.20, 0.30, 0.40]
-
+    l3_tolerance_space = [0.01, 0.05, 0.10, 0.20, 0.30]
+    
     param_grid = list(itertools.product(
         adv_th_space, str_th_space, l3_th_space, l3_tolerance_space,
         s1_w_space, s1_s_space, s1_o_space, s1_a_space
     ))
-
+    
     best_score = -1.0
     best_params, best_metrics = {}, {}
     fallback_metrics, fallback_params = {"fpr": 1.0}, {}
-
     pbar = tqdm(total=len(param_grid), desc="Optimizing")
-
+    
     for th_adv, th_str, th_l3, t_l3, th_s1_w, th_s1_s, th_s1_o, th_s1_a in param_grid:
         res = simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, t_l3, th_s1_w, th_s1_s, th_s1_o, th_s1_a)
         score = objective_function(res["tp"], res["fp"], res["fn"], res["tn"], beta=args_cmd.beta)
@@ -508,7 +520,7 @@ def main():
                 "th_adv": th_adv, "th_str": th_str, "th_l3": th_l3, "t_l3": t_l3,
                 "th_s1_w": th_s1_w, "th_s1_s": th_s1_s, "th_s1_o": th_s1_o, "th_s1_a": th_s1_a
             }
-
+            
         if score > best_score:
             best_score = score
             best_metrics = res.copy()
@@ -518,16 +530,17 @@ def main():
                 "th_s1_w": th_s1_w, "th_s1_s": th_s1_s, "th_s1_o": th_s1_o, "th_s1_a": th_s1_a
             }
         pbar.update(1)
+        
     pbar.close()
-
+    
     if best_score <= 0:
         best_params, best_metrics = fallback_params, fallback_metrics
-
+        
     tp, fp, fn, tn = best_metrics["tp"], best_metrics["fp"], best_metrics["fn"], best_metrics["tn"]
     prec = tp / (tp + fp) if (tp + fp) > 0 else 0
     rec = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
-
+    
     print("\n" + "="*50 + "\nOptimization Done!\n" + "="*50)
     print(f"Best Params (Stage 1):")
     print(f"  Max Word Len: {best_params['th_s1_w']}")
@@ -542,11 +555,12 @@ def main():
     print(f"  Stage 2 (Adv):           TP={best_metrics['s2_tp']}, FP={best_metrics['s2_fp']}")
     print(f"  Stage 3 (Sem):           TP={best_metrics['s3_tp']}, FP={best_metrics['s3_fp']}")
     print("="*50)
-
-    log_dir = "result/debug_logs"
+    
+    log_dir_name = "_".join(args_cmd.attack_type)
+    log_dir = f"result/debug_logs/{log_dir_name}"
     os.makedirs(log_dir, exist_ok=True)
+    
     fp_list, fn_list = [], []
-
     for feat in extracted_data:
         label = feat["label"]
         s1 = feat["regex_triggered"] or \
@@ -560,14 +574,16 @@ def main():
         detected = s1 or s2 or s3
         
         entry = {"label": label, "code": feat["full_code"], "triggers": {"s1": s1, "s2": s2, "s3": s3}}
-        if label == 0 and detected: fp_list.append(entry)
-        elif label == 1 and not detected: fn_list.append(entry)
-
+        if label == 0 and detected:
+            fp_list.append(entry)
+        elif label == 1 and not detected:
+            fn_list.append(entry)
+            
     with open(os.path.join(log_dir, "fp_samples.jsonl"), "w", encoding="utf-8") as f:
         for item in fp_list: f.write(json.dumps(item) + "\n")
     with open(os.path.join(log_dir, "fn_samples.jsonl"), "w", encoding="utf-8") as f:
         for item in fn_list: f.write(json.dumps(item) + "\n")
-
+        
     print(f"[-] Saved FP ({len(fp_list)}) and FN ({len(fn_list)}) logs to {log_dir}")
 
 if __name__ == "__main__":
