@@ -29,7 +29,6 @@ import random
 import re
 import filelock
 from typing import Dict, List, Any, Optional
-
 from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
@@ -205,7 +204,6 @@ def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGua
     features["s1_spec_str"] = max_spec_str
     features["s1_spec_other"] = max_spec_other
     features["s1_non_ascii"] = max_non_ascii
-
     lang_name = getattr(pre_filter, 'lang_name', 'c')
     comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
     string_node = "(string) @string" if lang_name == "python" else "(string_literal) @string"
@@ -219,11 +217,10 @@ def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGua
         if len(text) < 10:
             continue
             
-        
         score = adv_guard.calc_mink_score(
             text[:3000], 
             node_type=type_name, 
-            k=None  
+            k=None
         )
         whitelisted = adv_guard.is_whitelisted(text)
         
@@ -364,10 +361,20 @@ def main():
     
     print(f"[-] Load model: {args_cmd.model_id}...")
     set_seed(42)
+    torch.set_float32_matmul_precision('high')
     tokenizer = AutoTokenizer.from_pretrained(args_cmd.model_id)
+    # Set padding side left to support correct batch formatting
+    tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(args_cmd.model_id, torch_dtype=torch.float16).to(device)
+        
+    # Applied FlashAttention-2 and torch.compile for prefill acceleration
+    model = AutoModelForCausalLM.from_pretrained(
+        args_cmd.model_id, 
+        torch_dtype=torch.float16,
+        attn_implementation="flash_attention_2"
+    ).to(device)
+    model = torch.compile(model)
     model.eval()
     
     supported_langs = ["c", "java", "solidity", "python", "cpp"]
@@ -400,7 +407,7 @@ def main():
         "adaptive_decoys": "Dataset/Adaptive_attack/decoys_attack.jsonl",
         "adaptive_copy": "Dataset/Adaptive_attack/copy_trigger_attack.jsonl",
         "adaptive_contextual": "Dataset/Adaptive_attack/contextual_attack.jsonl",
-        "merged": "Dataset/merged_all/tiny_merged_dataset.jsonl"
+        "merged": "Dataset/Merged_all/Merged_all_dataset.jsonl"
     }
     
     files_to_load = set()
@@ -560,6 +567,10 @@ def main():
     log_dir = f"result/debug_logs/{log_dir_name}"
     os.makedirs(log_dir, exist_ok=True)
     
+    param_export_path = os.path.join(log_dir, "optimal_params.json")
+    with open(param_export_path, "w", encoding="utf-8") as f:
+        json.dump(best_params, f, indent=4)
+        
     fp_list, fn_list = [], []
     for feat in extracted_data:
         label = feat["label"]

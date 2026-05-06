@@ -114,7 +114,6 @@ from datetime import datetime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tree_sitter import Language, Parser
 from typing import Dict, Any
-
 from pre_filter import PreFilter
 from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
@@ -218,6 +217,7 @@ def main():
     parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.025)
     parser.add_argument("-L3_t", "--l3_surprise_tolerance", type=float, default=0.10)
     parser.add_argument("--default_lang", type=str, default="c")
+    parser.add_argument("--eval_out_dir", type=str, default="result/evaluation")
     
     args = parser.parse_args()
     attack_type = "Unknown"
@@ -239,11 +239,21 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[-] Load Guard Model: {args.model_id}...")
     
+    torch.set_float32_matmul_precision('high')
+    
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
+    # Ensure correct padding configuration for batch operations
+    tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
-    model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype=torch.float16).to(device)
+    # Implement FlashAttention-2 and precompile model
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_id, 
+        dtype=torch.bfloat16,
+        attn_implementation="sdpa"
+    ).to(device)
+    model = torch.compile(model)
     model.eval()
     
     supported_langs = ["c", "cpp", "java", "solidity", "python"]
@@ -421,7 +431,7 @@ def main():
     fn_file.close()
     fp_file.close()
     
-    eval_dir = f"result/evaluation/{attack_type}"
+    eval_dir = f"{args.eval_out_dir}/{attack_type}"
     os.makedirs(eval_dir, exist_ok=True)
     
     tp_final, fp_final = stats["L123_TP"], stats["L123_FP"]

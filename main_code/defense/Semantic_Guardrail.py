@@ -32,9 +32,9 @@ class SemanticGuardrail:
         }
         
         self.noise_prefixes = ('trace_', 'debug_', 'test_', 'assert_', 'sys_', 'standard_', 'std_', 'av_', 'ff_')
-        self.noise_suffixes = ('_init', '_exit', '_free', '_alloc', '_create', '_destroy', 
-                               '_tab', '_table', '_list', '_queue', '_desc', '_info', '_data', 
-                               '_ops', '_cb', '_ctx', '_t', '_s', '_eq', '_ne', '_impl', '_handler')
+        self.noise_suffixes = ('_init', '_exit', '_free', '_alloc', '_create', '_destroy',
+                                '_tab', '_table', '_list', '_queue', '_desc', '_info', '_data',
+                                '_ops', '_cb', '_ctx', '_t', '_s', '_eq', '_ne', '_impl', '_handler')
 
     def get_token_losses(self, input_ids):
         with torch.no_grad():
@@ -44,6 +44,22 @@ class SemanticGuardrail:
             loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             return losses.detach().cpu().to(torch.float32).numpy()
+
+    # Added batch processing for inference acceleration
+    def get_batch_mean_losses(self, input_ids, attention_mask):
+        with torch.no_grad():
+            outputs = self.model(input_ids, attention_mask=attention_mask)
+            shift_logits = outputs.logits[..., :-1, :].contiguous()
+            shift_labels = input_ids[..., 1:].contiguous()
+            shift_mask = attention_mask[..., 1:].contiguous()
+
+            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+            losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            losses = losses.view(input_ids.size(0), -1)
+
+            losses = losses * shift_mask
+            mean_losses = losses.sum(dim=1) / shift_mask.sum(dim=1)
+            return mean_losses.detach().cpu().to(torch.float32).numpy()
 
     def get_prior_loss(self, var_text):
         inputs = self.tokenizer(var_text, return_tensors="pt").to(self.device)
@@ -58,7 +74,6 @@ class SemanticGuardrail:
         
         suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
         eval_suffix = suffix[:self.suffix_window]
-
         if len(eval_suffix) < 10: return 0.0
         
         text_orig = local_prefix + target_text + eval_suffix
@@ -70,15 +85,16 @@ class SemanticGuardrail:
         else: 
             neutral_repls = ["VAR", "TMP", "IDX"]
             
-        baseline_losses = []
-        for repl in neutral_repls:
-            text_neutral = local_prefix + repl + eval_suffix
-            inputs = self.tokenizer(text_neutral, return_tensors="pt").to(self.device)["input_ids"]
-            baseline_losses.append(np.mean(self.get_token_losses(inputs)))
-            
-        loss_orig = np.mean(self.get_token_losses(self.tokenizer(text_orig, return_tensors="pt").to(self.device)["input_ids"]))
+        # Refactored to utilize batched tensor operations
+        batch_texts = [text_orig] + [local_prefix + repl + eval_suffix for repl in neutral_repls]
         
-        return loss_orig - np.mean(baseline_losses)
+        inputs = self.tokenizer(batch_texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
+        mean_losses = self.get_batch_mean_losses(inputs["input_ids"], inputs["attention_mask"])
+        
+        loss_orig = mean_losses[0]
+        baseline_losses = mean_losses[1:]
+        
+        return float(loss_orig - np.mean(baseline_losses))
 
     def is_noisy_variable(self, text):
         if text.startswith(self.noise_prefixes): return True
@@ -101,7 +117,6 @@ class SemanticGuardrail:
             factor += math.log1p(max(0, node_len)) / 10.0
         elif token_type in ('FUNC', 'MACRO'):
             factor *= 1.2
-
         if is_noisy: 
             factor *= 0.8
             
@@ -115,13 +130,10 @@ class SemanticGuardrail:
         
         code_bytes = bytes(code, "utf8")
         max_len = min(self.tokenizer.model_max_length, 2048)
-
         inputs = self.tokenizer(code, return_tensors="pt", truncation=True, max_length=max_len, return_offsets_mapping=True)
         input_ids = inputs["input_ids"].to(self.device)
         offsets = inputs["offset_mapping"][0].cpu().numpy()
-
         ctx_losses = self.get_token_losses(input_ids)
-
         try:
             tree = self.parser.parse(code_bytes)
             comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
@@ -131,7 +143,6 @@ class SemanticGuardrail:
             captures = query.captures(tree.root_node)
         except Exception:
             return code_bytes, []
-
         var_ranges = []
         for node, type_name in captures:
             text = node.text.decode("utf8", errors='ignore')
@@ -153,10 +164,8 @@ class SemanticGuardrail:
                 'node_type': type_name,
                 'len': node.end_byte - node.start_byte
             })
-
         last_byte_covered = offsets[-1][1] if len(offsets) > 0 else 0
         valid_var_ranges = [v for v in var_ranges if v['end'] <= last_byte_covered]
-
         var_ctx_map = defaultdict(list)
         var_meta_map = {}
         
@@ -164,14 +173,12 @@ class SemanticGuardrail:
             token_idx = i + 1
             if token_idx >= len(offsets): break
             start_off, end_off = offsets[token_idx]
-
             for v_info in valid_var_ranges:
                 if not (end_off <= v_info['start'] or start_off >= v_info['end']):
                     node_key = (v_info['start'], v_info['end'], v_info['text'])
                     var_ctx_map[node_key].append(loss)
                     var_meta_map[node_key] = v_info
                     break
-
         candidates = []
         for node_key, losses in var_ctx_map.items():
             max_ctx = np.max(losses)
@@ -179,14 +186,12 @@ class SemanticGuardrail:
                 var_text = node_key[2]
                 prior = self.get_prior_loss(var_text)
                 if prior is None: continue
-
                 surprise_score = max(0.0, max_ctx - prior)
                 candidates.append({
                     'var': var_text, 
                     'surprise_score': float(surprise_score), 
                     'meta': var_meta_map[node_key]
                 })
-
         candidates.sort(key=lambda x: x['surprise_score'], reverse=True)
         top_candidates = candidates[:self.top_k_candidates]
         
@@ -238,7 +243,6 @@ class SemanticGuardrail:
                 "surprise": cand['surprise_score'],
                 "factor": factor
             })
-
         return features
 
     def detect(self, code):
@@ -247,13 +251,11 @@ class SemanticGuardrail:
         code_bytes, top_candidates = self._get_top_candidates(code)
         if not top_candidates:
             return False, code, []
-
         candidate_stats = self._calculate_candidate_stats(code_bytes, top_candidates)
         
         toxic_nodes = []
         is_attack = False
         debug_info = []
-
         for stats in candidate_stats:
             cand = stats["cand"]
             var = cand['var']
@@ -283,12 +285,10 @@ class SemanticGuardrail:
                 "type": meta['type'],
                 "triggered": triggered
             })
-
         repaired_code = code
         if is_attack:
             toxic_nodes.sort(key=lambda x: x['start'], reverse=True)
             new_code_bytes = bytearray(code_bytes)
-
             for meta in toxic_nodes:
                 if meta['node_type'] == 'string':
                     new_code_bytes[meta['start']:meta['end']] = b'""'
@@ -296,5 +296,4 @@ class SemanticGuardrail:
                     del new_code_bytes[meta['start']:meta['end']]
                     
             repaired_code = new_code_bytes.decode("utf8", errors="ignore")
-
         return is_attack, repaired_code, debug_info
