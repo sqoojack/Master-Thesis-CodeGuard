@@ -12,33 +12,27 @@ class AdversarialGuardrail:
         self.lang_name = getattr(args, 'lang', 'c').lower()
         self.adversarial_threshold = args.adversarial_threshold
         self.th_string = args.th_string
-        # Use batch_size from args or default to 16
-        self.batch_size = getattr(args, 'batch_size', 16)
         self.docstring_keywords = [
             '>>>', 'Example:', 'Returns:', 'Check if', 'Input to this', 
             'Given a', 'For a', 'Calculate', 'is a palindrome',
             'TODO', 'FIXME', 'XXX', 'NOTE', 'Copyright', 'License', 'Author'
         ]
 
-    def get_batch_token_losses(self, input_ids, attention_mask):
-        """Calculate token-wise losses in batch"""
+    def get_token_losses(self, input_ids):
+        """Calculate token-wise losses for a single sequence"""
         with torch.no_grad():
-            outputs = self.model(input_ids, attention_mask=attention_mask, labels=input_ids)
+            outputs = self.model(input_ids, labels=input_ids)
             # Align logits and labels
             shift_logits = outputs.logits[..., :-1, :].contiguous()
             shift_labels = input_ids[..., 1:].contiguous()
-            shift_mask = attention_mask[..., 1:].contiguous()
             
             loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
-            # Calculate loss for the whole batch
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            losses = losses.view(input_ids.size(0), -1)
             
-            # Return losses and masks for valid tokens
-            return losses.detach().cpu().to(torch.float32).numpy(), shift_mask.detach().cpu().numpy()
+            return losses.detach().cpu().to(torch.float32).numpy()
 
     def calc_mink_score_from_losses(self, losses, token_count, node_type):
-        """Original Min-K score logic using pre-calculated losses"""
+        """Min-K score logic using pre-calculated losses"""
         if token_count < 5: return 0.0
         
         centers = {'identifier': 10, 'string': 40, 'comment': 60}
@@ -68,6 +62,7 @@ class AdversarialGuardrail:
         return mink_loss
 
     def is_whitelisted(self, text):
+        """Check if text contains docstring or whitelist keywords"""
         return any(kw.lower() in text.lower() for kw in self.docstring_keywords) or text.count('>>>') >= 1
     
     def get_captures_from_query(self, query, root_node):
@@ -104,56 +99,51 @@ class AdversarialGuardrail:
 
         if not node_data: return False, code, []
 
-        # 2. Iterative Batch Inference and Scoring
+        # 2. Sequential Inference and Scoring
         replacements = []
         triggered = False
         adv_debug = []
         special_tokens = ['<|', '|>', '<EOL>', '<s>', '</s>']
 
-        for i in range(0, len(node_data), self.batch_size):
-            batch_nodes = node_data[i : i + self.batch_size]
-            texts_to_batch = [d['text'] for d in batch_nodes]
+        for data in node_data:
+            text = data['text']
+            inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+            if inputs["input_ids"].shape[1] <= 1:
+                continue
+
+            valid_loss = self.get_token_losses(inputs["input_ids"])
+            score = self.calc_mink_score_from_losses(valid_loss, len(valid_loss), data['type'])
             
-            # Ensure tokenizer uses left padding if configured in main script
-            inputs = self.tokenizer(texts_to_batch, return_tensors="pt", padding=True).to(self.device)
-            batch_losses, batch_masks = self.get_batch_token_losses(inputs["input_ids"], inputs["attention_mask"])
+            current_threshold = self.adversarial_threshold
+            string_th = self.th_string
+            whitelisted = self.is_whitelisted(text)
+            
+            if data['type'] == 'comment' and len(text) < 40:
+                current_threshold += 2.0 * (1.0 - (len(text) / 40.0))
+            if whitelisted:
+                current_threshold *= 1.5
+                string_th *= 1.5
+            if any(t in text for t in special_tokens) or '\r' in text:
+                score += 10.0
 
-            for j, data in enumerate(batch_nodes):
-                # Extract valid losses excluding padding tokens
-                valid_loss = batch_losses[j][batch_masks[j] == 1]
-                score = self.calc_mink_score_from_losses(valid_loss, len(valid_loss), data['type'])
-                
-                text = data['text']
-                current_threshold = self.adversarial_threshold
-                string_th = self.th_string
-                whitelisted = self.is_whitelisted(text)
-                
-                if data['type'] == 'comment' and len(text) < 40:
-                    current_threshold += 2.0 * (1.0 - (len(text) / 40.0))
-                if whitelisted:
-                    current_threshold *= 1.5
-                    string_th *= 1.5
-                if any(t in text for t in special_tokens) or '\r' in text:
-                    score += 10.0
+            is_this_triggered = False
+            if data['type'] == 'comment' and score > current_threshold:
+                is_this_triggered = True
+                replacements.append((data['node'].start_byte, data['node'].end_byte, b""))
+            elif data['type'] == 'string' and score > string_th:
+                is_this_triggered = True
+                replacements.append((data['node'].start_byte, data['node'].end_byte, b'""'))
+            elif data['type'] == 'identifier' and score > current_threshold:
+                is_this_triggered = True
+                replacements.append((data['node'].start_byte, data['node'].end_byte, b""))
 
-                is_this_triggered = False
-                if data['type'] == 'comment' and score > current_threshold:
-                    is_this_triggered = True
-                    replacements.append((data['node'].start_byte, data['node'].end_byte, b""))
-                elif data['type'] == 'string' and score > string_th:
-                    is_this_triggered = True
-                    replacements.append((data['node'].start_byte, data['node'].end_byte, b'""'))
-                elif data['type'] == 'identifier' and score > current_threshold:
-                    is_this_triggered = True
-                    replacements.append((data['node'].start_byte, data['node'].end_byte, b""))
-
-                if is_this_triggered:
-                    triggered = True
-                    adv_debug.append({
-                        "type": data['type'], "score": score, 
-                        "threshold_applied": current_threshold if data['type'] != 'string' else string_th,
-                        "whitelisted": whitelisted, "text_snippet": text[:50].replace('\n', ' ')
-                    })
+            if is_this_triggered:
+                triggered = True
+                adv_debug.append({
+                    "type": data['type'], "score": score, 
+                    "threshold_applied": current_threshold if data['type'] != 'string' else string_th,
+                    "whitelisted": whitelisted, "text_snippet": text[:50].replace('\n', ' ')
+                })
 
         # 3. Apply replacements
         if not replacements: return False, code, []

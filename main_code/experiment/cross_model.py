@@ -5,6 +5,7 @@ Qwen/Qwen3.5-4B
 """
 
 # python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 0
+# python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 1
 import os
 import json
 import argparse
@@ -19,16 +20,15 @@ def run_cross_model_eval() -> None:
 
     # List of models to evaluate
     models_to_test = [
+        "google/gemma-4-31B-it-assistant",
+        "Qwen/Qwen3.5-0.8B",
         "Salesforce/codegen-350M-multi",
-        "Qwen/Qwen3.5-4B",
-        "mistralai/Ministral-3-3B-Base-2512",
-        "mistralai/Ministral-3-3B-Instruct-2512",
-        "mistralai/Ministral-3-3B-Reasoning-2512",
-        "google/gemma-4-E4B",
-        "google/gemma-4-E4B-it",
-        "deepseek-ai/DeepSeek-V4-Flash",
-        # "Qwen/Qwen3-Coder-Next",
-        "openai/gpt-oss-20b",
+        # "Qwen/Qwen3.5-4B",
+        # "mistralai/Ministral-3-3B-Base-2512",
+        # "mistralai/Ministral-3-3B-Instruct-2512",
+        # "mistralai/Ministral-3-3B-Reasoning-2512",
+        # "google/gemma-4-E4B",
+        # "google/gemma-4-E4B-it",
     ]
 
     # --- Automatic Path Resolution ---
@@ -80,9 +80,6 @@ def run_cross_model_eval() -> None:
             current_env["LD_LIBRARY_PATH"] = f"{conda_lib_dir}:{current_ld_path}"
         else:
             current_env["LD_LIBRARY_PATH"] = conda_lib_dir
-        
-        # Check if the model needs bitsandbytes (skip for gpt-oss-20b)
-        use_bnb = (model_id != "openai/gpt-oss-20b")
 
         cmd = [
             "python", "main_code/defense/main.py",
@@ -96,11 +93,9 @@ def run_cross_model_eval() -> None:
             "--th_string", str(params.get("th_str", 15.0)),
             "-L3_b", str(params.get("th_l3", 0.025)),
             "-L3_t", str(params.get("t_l3", 0.10)),
-            "--eval_out_dir", "result/cross_model"
+            "--eval_out_dir", "result/cross_model",
+            # "--no_bnb" # Disable bitsandbytes quantization for all models
         ]
-        
-        if not use_bnb:
-            cmd.append("--no_bnb")
 
         print(f"\n[*] Testing Target Model: {model_id}")
         

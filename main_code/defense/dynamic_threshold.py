@@ -198,7 +198,7 @@ def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGua
         
     nodes_to_scan = []
     for query in [pre_filter.string_query, pre_filter.comment_query, pre_filter.identifier_query, pre_filter.error_query]:
-        for node, _ in self.get_captures_from_query(query, tree.root_node):
+        for node, _ in get_captures_from_query(query, tree.root_node):
             nodes_to_scan.append(node)
             
     detected, repaired_code, debug_info = pre_filter.detect(code)
@@ -249,7 +249,7 @@ def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGua
     string_node = "(string) @string" if lang_name == "python" else "(string_literal) @string"
     query_adv_str = f"{comment_node} {string_node} (identifier) @identifier"
     query_adv = Query(language, query_adv_str)
-    captures_adv = self.get_captures_from_query(query_adv, tree.root_node)
+    captures_adv = get_captures_from_query(query_adv, tree.root_node)
     
     for node, type_name in captures_adv:
         text = node.text.decode("utf8", errors='ignore')
@@ -257,7 +257,7 @@ def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGua
             continue
 
         token_inputs = adv_guard.tokenizer([text[:3000]], return_tensors="pt", padding=True).to(adv_guard.device)
-        batch_losses, batch_masks = adv_guard.get_batch_token_losses(token_inputs["input_ids"], token_inputs["attention_mask"])
+        batch_losses, batch_masks = adv_guard.get_token_losses(token_inputs["input_ids"], token_inputs["attention_mask"])
         valid_loss = batch_losses[0][batch_masks[0] == 1]
         score = adv_guard.calc_mink_score_from_losses(valid_loss, len(valid_loss), node_type=type_name)
 
