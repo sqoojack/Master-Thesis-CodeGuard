@@ -26,7 +26,7 @@ def run_cross_layer_eval() -> None:
         params = json.load(f)
 
     # --- Execution ---
-    modes_to_test = ["l1", "l2", "l3"]
+    modes_to_test = ["all", "l1", "l2", "l3"]
     print(f"[*] Initializing Cross-Layer Evaluation...")
     print(f"[*] Attack Category: {args.attack_type}")
     print(f"[*] Target Model: {args.model_id}")
@@ -73,7 +73,7 @@ def run_cross_layer_eval() -> None:
 
     # --- Aggregation of Results ---
     print("\n[*] Aggregating layer statistics and latency...")
-    eval_dir = f"result/evaluation/{args.attack_type}"
+    eval_dir = f"result/cross_layer/{args.attack_type}"
     
     compiled_stats = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

@@ -8,7 +8,7 @@ class Config:
     
     # 優化參數
     TOP_K = 600             # Algorithm 1 中的候選池大小 預設400
-    EVAL_BATCH_SIZE = 32    # 評估時的 Mini-batch 大小，避免 Logits 撐爆 VRAM
+    EVAL_BATCH_SIZE = 8    # 評估時的 Mini-batch 大小，避免 Logits 撐爆 VRAM
     PERTURBATION_LEN = 8   # 擾動長度 (不含 Keyword) 
     KEYWORD_LEN = 2         # Keyword 長度 
     MAX_LENGTH = 1024

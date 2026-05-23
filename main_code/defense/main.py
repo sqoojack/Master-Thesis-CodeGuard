@@ -1,254 +1,346 @@
-import os
-import re
-import json
 import argparse
 import copy
-import torch
-import random
+import json
+import os
 import time
-import numpy as np
-import filelock
-import ctypes
-from tqdm import tqdm
-import subprocess
 from datetime import datetime
+from typing import Any, Dict
+
+import torch
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from tree_sitter import Language, Parser
-from typing import Dict, Any
-from pre_filter import PreFilter
-from Semantic_Guardrail import SemanticGuardrail
 from Adversarial_Guardrail import AdversarialGuardrail
+from Semantic_Guardrail import SemanticGuardrail
+from guardrail_common import (
+    NumpyEncoder,
+    SUPPORTED_LANGS,
+    clean_dataset_metadata,
+    compute_metrics,
+    ensure_dirs,
+    metric_report_to_dict,
+    normalize_language,
+    resolve_dataset_path,
+    set_seed,
+    setup_tree_sitter,
+    make_parser,
+)
+from pre_filter import PreFilter
 
-def set_seed(seed: int = 42) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+LayerResult = Dict[str, Any]
+GuardrailBundle = Dict[str, Any]
+Stats = Dict[str, int]
 
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, (np.floating, np.integer, np.bool_)):
-            return obj.item()
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super().default(obj)
 
-def clean_dataset_metadata(code_text: str) -> str:
-    if not code_text: return ""
-    code = re.sub(r'//\s*<(yes|no)>\s*<report>.*', '', code_text, flags=re.IGNORECASE)
-    return re.sub(r'/\*[\s\S]*?@(source|article|vulnerable_at_lines):[\s\S]*?\*/', '', code)
-
-def setup_tree_sitter(lang_name: str) -> Language:
-    ts_dir, repo_name = "build", f"tree-sitter-{lang_name}"
-    repo_dir, lib_path = os.path.join(ts_dir, repo_name), os.path.join(ts_dir, f"{lang_name}.so")
-    
-    repo_urls = {
-        "solidity": "https://github.com/JoranHonig/tree-sitter-solidity",
-        "java": "https://github.com/tree-sitter/tree-sitter-java",
-        "c": "https://github.com/tree-sitter/tree-sitter-c",
-        "python": "https://github.com/tree-sitter/tree-sitter-python",
-        "cpp": "https://github.com/tree-sitter/tree-sitter-cpp"
-    }
-    url = repo_urls.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
-    
-    os.makedirs(ts_dir, exist_ok=True)
-    with filelock.FileLock(f"{lib_path}.lock"):
-        if not os.path.exists(repo_dir):
-            subprocess.run(["git", "clone", url, repo_dir], check=True)
-        if not os.path.exists(lib_path):
-            src = os.path.join(repo_dir, "src")
-            p_c, s_c, s_cc = os.path.join(src, "parser.c"), os.path.join(src, "scanner.c"), os.path.join(src, "scanner.cc")
-            cmd = ["cc", "-shared", "-fPIC", "-I", src, p_c]
-            if os.path.exists(s_c): cmd.append(s_c)
-            elif os.path.exists(s_cc): 
-                cmd[0] = "c++"
-                cmd.append(s_cc)
-            subprocess.run(cmd + ["-o", lib_path], check=True)
-            
-        lib = ctypes.cdll.LoadLibrary(lib_path)
-        lang_ptr = getattr(lib, f"tree_sitter_{lang_name}")
-        lang_ptr.restype = ctypes.c_void_p # Fix SIGSEGV 11
-        return Language(lang_ptr())
-
-def detect_language(code: str) -> str:
-    if not code: return "c"
-    c_low = code.lower()
-    if any(k in c_low for k in ["pragma solidity", "contract "]): return "solidity"
-    if any(k in c_low for k in ["public class ", "system.out."]): return "java"
-    if "def " in c_low or ("import " in c_low and "java" not in c_low): return "python"
-    if any(k in c_low for k in ["std::", "#include <iostream>"]): return "cpp"
-    return "c"
-
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("-at", "--attack_type", type=str, required=True)
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
+
+    # Stage 1.  Keep legacy flags, and add node-type-specific flags.
     parser.add_argument("--s1_word", type=int, default=100)
-    parser.add_argument("--s1_str", type=float, default=0.10)
-    parser.add_argument("--s1_other", type=float, default=0.30)
+    parser.add_argument("--s1_str", type=float, default=None)
+    parser.add_argument("--s1_other", type=float, default=None)
+    parser.add_argument("--s1_identifier", type=float, default=None)
+    parser.add_argument("--s1_comment", type=float, default=None)
+    parser.add_argument("--s1_error", type=float, default=None)
     parser.add_argument("--s1_ascii", type=float, default=0.001)
+    parser.add_argument("--mixed_error_ratio", type=float, default=0.15)
+
+    # Stage 2.
     parser.add_argument("-A", "--adversarial_threshold", type=float, default=10.0)
     parser.add_argument("--th_string", type=float, default=15.0)
+
+    # Stage 3.
     parser.add_argument("-L3_b", "--l3_base_influence", type=float, default=0.025)
     parser.add_argument("-L3_t", "--l3_surprise_tolerance", type=float, default=0.10)
+    parser.add_argument("--l3_min_surprise", type=float, default=0.15)
+    parser.add_argument("--l3_z_trigger", type=float, default=3.5)
+
     parser.add_argument("--default_lang", type=str, default="c")
+    parser.add_argument("-bs", "--batch_size", type=int, default=8, help="Max rows per length-bucketed guardrail scoring batch")
+    parser.add_argument("--batch_token_budget", type=int, default=2048, help="Max padded tokens per guardrail scoring microbatch")
     parser.add_argument("--eval_out_dir", type=str, default="result/evaluation")
     parser.add_argument("--mode", type=str, default="all", choices=["all", "l1", "l2", "l3"], help="Select detection layer")
-    args = parser.parse_args()
+    parser.add_argument("--pull_tree_sitter", action="store_true")
+    parser.add_argument("--seed", type=int, default=42)
+    return parser
 
-    # Data Path Config
-    adaptive_map = {
-        "adaptive_decoys": "Dataset/Adaptive_attack/decoys_attack.jsonl",
-        "adaptive_copy": "Dataset/Adaptive_attack/copy_trigger_attack.jsonl",
-        "adaptive_contextual": "Dataset/Adaptive_attack/contextual_attack.jsonl"
+
+def resolve_params_file(args: argparse.Namespace) -> str:
+    return f"result/debug_logs/{args.attack_type}/optimal_params.json"
+
+
+def apply_params_file(args: argparse.Namespace) -> argparse.Namespace:
+    param_file = resolve_params_file(args)
+    args.param_file = param_file
+
+    if not os.path.exists(param_file):
+        raise FileNotFoundError(
+            f"optimal_params.json not found: {param_file}. "
+            "Run dynamic_threshold.py first for this attack_type."
+        )
+
+    with open(param_file, "r", encoding="utf-8") as f:
+        params = json.load(f)
+
+    mapping = {
+        "th_adv": "adversarial_threshold",
+        "th_str": "th_string",
+        "th_l3": "l3_base_influence",
+        "t_l3": "l3_surprise_tolerance",
+        "l3_min_surprise": "l3_min_surprise",
+        "l3_z_trigger": "l3_z_trigger",
+        "th_s1_w": "s1_word",
+        "th_s1_str": "s1_str",
+        "th_s1_identifier": "s1_identifier",
+        "th_s1_comment": "s1_comment",
+        "th_s1_error": "s1_error",
+        "th_s1_a": "s1_ascii",
     }
-    input_path = adaptive_map.get(args.attack_type, f"Dataset/{args.attack_type}/{args.attack_type}_dataset.jsonl")
+    for key, attr in mapping.items():
+        if key in params:
+            setattr(args, attr, params[key])
+
+    print(f"[*] Loaded tuned parameters from: {param_file}")
+    return args
+
+
+def resolve_output_paths(args: argparse.Namespace) -> tuple[str, str, str, str]:
+    input_path = resolve_dataset_path(args.attack_type)
     output_path = f"result/sanitized_data/{args.attack_type}/{args.mode}_CodeGuard.jsonl"
     debug_dir = f"result/debug_logs/{args.attack_type}/{args.mode}"
     eval_dir = f"{args.eval_out_dir}/{args.attack_type}"
-    for d in [os.path.dirname(output_path), debug_dir, eval_dir]: os.makedirs(d, exist_ok=True)
+    ensure_dirs(os.path.dirname(output_path), debug_dir, eval_dir)
+    return input_path, output_path, debug_dir, eval_dir
 
+
+def load_model_and_tokenizer(args: argparse.Namespace):
     print(f"[-] Mode: {args.mode} | Model: {args.model_id}...")
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
-    if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
-        
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    model = AutoModelForCausalLM.from_pretrained(args.model_id, device_map="auto", torch_dtype=dtype, trust_remote_code=True)
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_id,
+        device_map="auto",
+        torch_dtype=dtype,
+        trust_remote_code=True,
+    )
     model.eval()
-    device = next(model.parameters()).device
+    return model, tokenizer, next(model.parameters()).device
 
-    # Guardrails
-    supported_langs = ["c", "cpp", "java", "solidity", "python"]
-    guardrails = {}
-    for l in supported_langs:
+
+def build_guardrails(args: argparse.Namespace, model, tokenizer, device) -> GuardrailBundle:
+    guardrails: GuardrailBundle = {}
+
+    for lang in SUPPORTED_LANGS:
         try:
-            ts_lang = setup_tree_sitter(l)
-            ts_parser = Parser(ts_lang)
-            l_args = copy.copy(args)
-            l_args.lang = l
-            guardrails[l] = {
-                "pre": PreFilter(ts_parser, ts_lang, l, args.s1_word, args.s1_str, args.s1_other, args.s1_ascii),
-                "adv": AdversarialGuardrail(model, tokenizer, device, ts_parser, ts_lang, l_args),
-                "sem": SemanticGuardrail(model, tokenizer, device, ts_parser, ts_lang, l_args)
+            ts_lang = setup_tree_sitter(lang, pull_existing=args.pull_tree_sitter)
+            ts_parser = make_parser(ts_lang)
+            lang_args = copy.copy(args)
+            lang_args.lang = lang
+            guardrails[lang] = {
+                "pre": PreFilter(
+                    ts_parser,
+                    ts_lang,
+                    lang,
+                    args.s1_word,
+                    args.s1_str,
+                    args.s1_other,
+                    args.s1_ascii,
+                    args.s1_identifier,
+                    args.s1_comment,
+                    args.s1_error,
+                    args.mixed_error_ratio,
+                ),
+                "adv": AdversarialGuardrail(model, tokenizer, device, ts_parser, ts_lang, lang_args),
+                "sem": SemanticGuardrail(model, tokenizer, device, ts_parser, ts_lang, lang_args),
             }
-        except Exception as e: print(f"[!] Error loading {l}: {e}")
+        except Exception as exc:
+            print(f"[!] Error loading {lang}: {exc}")
 
-    def run_pipeline(code: str, lang: str) -> Dict[str, Any]:
-        pipe = guardrails.get(lang, guardrails.get(args.default_lang))
-        res = {"Regex": False, "Adversarial": False, "Semantic": False, "final_code": code}
-        if not pipe: return res
-        
-        s1_c, s2_c, f_c = code, code, code
-        # Layer 1: Regex
-        if args.mode in ["all", "l1"]:
-            res["Regex"], s1_c, res["reg_debug"] = pipe["pre"].detect(code)
-        # Layer 2: Adversarial
-        if args.mode in ["all", "l2"]:
-            input_l2 = s1_c if args.mode == "all" else code
-            res["Adversarial"], s2_c, res["adv_debug"] = pipe["adv"].detect(input_l2)
-        # Layer 3: Semantic
-        if args.mode in ["all", "l3"]:
-            input_l3 = s2_c if args.mode == "all" else code
-            res["Semantic"], f_c, res["sem_debug"] = pipe["sem"].detect(input_l3)
-        
-        is_mal = res["Regex"] or res["Adversarial"] or res["Semantic"]
-        res["final_code"] = "// [MALICIOUS DETECTED]" if is_mal else f_c
-        return res
+    return guardrails
 
-    with open(input_path, 'r') as f: lines = [l.strip() for l in f if l.strip()]
 
-    # Statistics setup
-    stats = {
-        "TP": 0, "TN": 0, "FP": 0, "FN": 0, "total_benign": 0, "total_adv": 0,
-        "L1_TP": 0, "L1_FP": 0, "L2_TP": 0, "L2_FP": 0, "L3_TP": 0, "L3_FP": 0
+def run_pipeline(code: str, lang: str, guardrails: GuardrailBundle, args: argparse.Namespace) -> LayerResult:
+    pipe = guardrails.get(lang, guardrails.get(args.default_lang))
+    result: LayerResult = {"Regex": False, "Adversarial": False, "Semantic": False, "final_code": code}
+    if not pipe:
+        return result
+
+    current_code = code
+    if args.mode in ("all", "l1"):
+        result["Regex"], current_code, result["reg_debug"] = pipe["pre"].detect(code)
+    if args.mode in ("all", "l2"):
+        input_l2 = current_code if args.mode == "all" else code
+        result["Adversarial"], current_code, result["adv_debug"] = pipe["adv"].detect(input_l2)
+    if args.mode in ("all", "l3"):
+        input_l3 = current_code if args.mode == "all" else code
+        result["Semantic"], current_code, result["sem_debug"] = pipe["sem"].detect(input_l3)
+
+    result["final_code"] = current_code
+    return result
+
+
+def is_detected(result: LayerResult) -> bool:
+    return bool(result["Regex"] or result["Adversarial"] or result["Semantic"])
+
+
+def empty_stats() -> Stats:
+    return {
+        "TP": 0,
+        "TN": 0,
+        "FP": 0,
+        "FN": 0,
+        "total_benign": 0,
+        "total_adv": 0,
+        "L1_TP": 0,
+        "L1_FP": 0,
+        "L2_TP": 0,
+        "L2_FP": 0,
+        "L3_TP": 0,
+        "L3_FP": 0,
     }
-    total_latency, processed_count = 0.0, 0
-    fn_log = open(os.path.join(debug_dir, "FN_log.jsonl"), 'w')
-    fp_log = open(os.path.join(debug_dir, "FP_log.jsonl"), 'w')
 
-    with open(output_path, 'w') as out_f:
+
+def update_layer_counts(stats: Stats, result: LayerResult, *, positive_label: bool) -> None:
+    suffix = "TP" if positive_label else "FP"
+    if result.get("Regex"):
+        stats[f"L1_{suffix}"] += 1
+    if result.get("Adversarial"):
+        stats[f"L2_{suffix}"] += 1
+    if result.get("Semantic"):
+        stats[f"L3_{suffix}"] += 1
+
+
+def evaluate_benign(entry: dict[str, Any], guardrails: GuardrailBundle, args: argparse.Namespace) -> tuple[str, LayerResult, float]:
+    code = clean_dataset_metadata(entry.get("code", ""))
+    lang = normalize_language(entry.get("language", entry.get("lang")), code, args.default_lang)
+
+    start = time.perf_counter()
+    result = run_pipeline(code, lang, guardrails, args)
+    return code, result, time.perf_counter() - start
+
+
+def evaluate_adversarial(entry: dict[str, Any], guardrails: GuardrailBundle, args: argparse.Namespace) -> tuple[str, LayerResult, float]:
+    code = clean_dataset_metadata(entry.get("adv_code", ""))
+    lang = normalize_language(entry.get("language", entry.get("lang")), code, args.default_lang)
+
+    start = time.perf_counter()
+    result = run_pipeline(code, lang, guardrails, args)
+    return code, result, time.perf_counter() - start
+
+
+def process_dataset(input_path: str, output_path: str, debug_dir: str, guardrails: GuardrailBundle, args: argparse.Namespace) -> tuple[Stats, float, int]:
+    stats = empty_stats()
+    total_latency = 0.0
+    processed_count = 0
+
+    with open(input_path, "r", encoding="utf-8") as dataset_file:
+        lines = [line.strip() for line in dataset_file if line.strip()]
+
+    fn_path = os.path.join(debug_dir, "FN_log.jsonl")
+    fp_path = os.path.join(debug_dir, "FP_log.jsonl")
+
+    with (
+        open(output_path, "w", encoding="utf-8") as out_f,
+        open(fn_path, "w", encoding="utf-8") as fn_log,
+        open(fp_path, "w", encoding="utf-8") as fp_log,
+    ):
         for line in tqdm(lines, desc="Processing", ncols=100):
             entry = json.loads(line)
-            
-            # 1. Benign evaluation
-            b_code = clean_dataset_metadata(entry.get("code", ""))
-            lang = entry.get("language", detect_language(b_code)).lower()
-            lang = lang if lang in supported_langs else args.default_lang
-            
-            start = time.perf_counter()
-            res_b = run_pipeline(b_code, lang)
-            total_latency += (time.perf_counter() - start)
+
+            benign_code, benign_result, latency = evaluate_benign(entry, guardrails, args)
+            total_latency += latency
             processed_count += 1
-            
             stats["total_benign"] += 1
-            if res_b.get("Regex"): stats["L1_FP"] += 1
-            if res_b.get("Adversarial"): stats["L2_FP"] += 1
-            if res_b.get("Semantic"): stats["L3_FP"] += 1
-            
-            is_fp = res_b["Regex"] or res_b["Adversarial"] or res_b["Semantic"]
-            if is_fp:
+            update_layer_counts(stats, benign_result, positive_label=False)
+
+            if is_detected(benign_result):
                 stats["FP"] += 1
-                fp_log.write(json.dumps({"id": stats["total_benign"], "code": b_code, "debug": res_b}, cls=NumpyEncoder) + "\n")
+                fp_log.write(json.dumps({"id": stats["total_benign"], "code": benign_code, "debug": benign_result}, cls=NumpyEncoder) + "\n")
             else:
                 stats["TN"] += 1
 
-            # 2. Adversarial evaluation
-            a_code = clean_dataset_metadata(entry.get("adv_code", ""))
-            a_lang = entry.get("language", detect_language(a_code)).lower()
-            a_lang = a_lang if a_lang in supported_langs else args.default_lang
-            
-            start = time.perf_counter()
-            res_a = run_pipeline(a_code, a_lang)
-            total_latency += (time.perf_counter() - start)
+            adv_code, adv_result, latency = evaluate_adversarial(entry, guardrails, args)
+            total_latency += latency
             processed_count += 1
-            
             stats["total_adv"] += 1
-            if res_a.get("Regex"): stats["L1_TP"] += 1
-            if res_a.get("Adversarial"): stats["L2_TP"] += 1
-            if res_a.get("Semantic"): stats["L3_TP"] += 1
-            
-            detected = res_a["Regex"] or res_a["Adversarial"] or res_a["Semantic"]
+            update_layer_counts(stats, adv_result, positive_label=True)
+
+            detected = is_detected(adv_result)
             if detected:
                 stats["TP"] += 1
             else:
                 stats["FN"] += 1
-                fn_log.write(json.dumps({"id": stats["total_adv"], "code": a_code, "debug": res_a}, cls=NumpyEncoder) + "\n")
+                fn_log.write(json.dumps({"id": stats["total_adv"], "code": adv_code, "debug": adv_result}, cls=NumpyEncoder) + "\n")
 
-            entry.update({
-                "repaired_code": res_a["final_code"],
-                "defense_detected": detected,
-                "layer_triggers": {"L1": res_a.get("Regex"), "L2": res_a.get("Adversarial"), "L3": res_a.get("Semantic")}
-            })
+            entry.update(
+                {
+                    "repaired_code": adv_result["final_code"],
+                    "defense_detected": detected,
+                    "layer_triggers": {
+                        "L1": adv_result.get("Regex"),
+                        "L2": adv_result.get("Adversarial"),
+                        "L3": adv_result.get("Semantic"),
+                    },
+                }
+            )
             out_f.write(json.dumps(entry, cls=NumpyEncoder) + "\n")
 
-    fn_log.close(); fp_log.close()
+    return stats, total_latency, processed_count
 
-    # Final Metrics
+
+def build_metrics_report(stats: Stats, total_latency: float, processed_count: int, args: argparse.Namespace) -> dict[str, Any]:
     avg_ms = (total_latency / processed_count) * 1000 if processed_count > 0 else 0
-    prec = stats["TP"] / (stats["TP"] + stats["FP"]) if (stats["TP"] + stats["FP"]) > 0 else 0
-    recall = stats["TP"] / (stats["TP"] + stats["FN"]) if (stats["TP"] + stats["FN"]) > 0 else 0
-    f1 = (2 * prec * recall) / (prec + recall) if (prec + recall) > 0 else 0
-    fpr = stats["FP"] / (stats["FP"] + stats["TN"]) if (stats["FP"] + stats["TN"]) > 0 else 0
-    
-    metrics_report = {
+    metrics = compute_metrics(stats["TP"], stats["FP"], stats["FN"], stats["TN"])
+
+    return {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "model": args.model_id,
         "mode": args.mode,
+        "param_file": getattr(args, "param_file", None),
         "metrics": {
-            "f1": round(f1, 4), "precision": round(prec, 4), "recall": round(recall, 4), "fpr": round(fpr, 4),
-            "latency_ms": round(avg_ms, 2)
+            **metric_report_to_dict(metrics),
+            "latency_ms": round(avg_ms, 2),
         },
         "layer_tp": {"L1": stats["L1_TP"], "L2": stats["L2_TP"], "L3": stats["L3_TP"]},
-        "layer_fp": {"L1": stats["L1_FP"], "L2": stats["L2_FP"], "L3": stats["L3_FP"]}
+        "layer_fp": {"L1": stats["L1_FP"], "L2": stats["L2_FP"], "L3": stats["L3_FP"]},
+        "_raw": {"f1": metrics.f1, "fpr": metrics.fpr, "avg_ms": avg_ms},
     }
-    with open(os.path.join(eval_dir, f"{args.mode}_metrics.jsonl"), 'a') as f:
-        f.write(json.dumps(metrics_report) + "\n")
 
-    print(f"\n[+] Results ({args.mode}): F1={f1:.4f}, FPR={fpr*100:.2f}%, Latency={avg_ms:.2f}ms")
+
+def write_metrics(eval_dir: str, report: dict[str, Any], args: argparse.Namespace) -> None:
+    report_to_write = {key: value for key, value in report.items() if key != "_raw"}
+
+    if args.mode != "all":
+        with open(os.path.join(eval_dir, f"{args.mode}_metrics.jsonl"), "a", encoding="utf-8") as metrics_file:
+            metrics_file.write(json.dumps(report_to_write) + "\n")
+    else:
+        with open(os.path.join(eval_dir, "f1_score.jsonl"), "a", encoding="utf-8") as metrics_file:
+            metrics_file.write(json.dumps(report_to_write) + "\n")
+
+
+def main() -> None:
+    args = apply_params_file(build_arg_parser().parse_args())
+    set_seed(args.seed)
+
+    input_path, output_path, debug_dir, eval_dir = resolve_output_paths(args)
+    model, tokenizer, device = load_model_and_tokenizer(args)
+    guardrails = build_guardrails(args, model, tokenizer, device)
+
+    stats, total_latency, processed_count = process_dataset(input_path, output_path, debug_dir, guardrails, args)
+    metrics_report = build_metrics_report(stats, total_latency, processed_count, args)
+    write_metrics(eval_dir, metrics_report, args)
+
+    raw = metrics_report["_raw"]
+    print(f"\n[+] Results ({args.mode}): f1_score={raw['f1']:.4f}, FPR={raw['fpr']*100:.2f}%, Latency={raw['avg_ms']:.2f}ms")
     print(f"    Layer TPs: L1={stats['L1_TP']}, L2={stats['L2_TP']}, L3={stats['L3_TP']}")
+    print(f"    Layer FPs: L1={stats['L1_FP']}, L2={stats['L2_FP']}, L3={stats['L3_FP']}")
+
 
 if __name__ == "__main__":
-    set_seed()
     main()

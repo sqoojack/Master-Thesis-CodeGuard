@@ -24,6 +24,7 @@ def build_cotdeceptor_dataset(input_file: str, output_file: str, dataset_source:
                 data = json.loads(line)
                 
                 # Extract required fields
+                orig_id = data.get("id", "")
                 orig_code = data.get("orig_code", "")
                 adv_code = data.get("adv_code", "")
 
@@ -32,9 +33,14 @@ def build_cotdeceptor_dataset(input_file: str, output_file: str, dataset_source:
                     error_count += 1
                     continue
 
+                # Parse CWE IDs from the id field
+                cwe_parts = [part for part in orig_id.split("_") if part.startswith("CWE-")]
+                cwe_id = "_".join(cwe_parts) if cwe_parts else ""
+
                 # Construct new data entry
                 new_entry = {
                     "dataset_source": dataset_source,
+                    "CWE_id": cwe_id,
                     "code": orig_code,
                     "adv_code": adv_code
                 }
@@ -62,8 +68,8 @@ def build_cotdeceptor_dataset(input_file: str, output_file: str, dataset_source:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert CoTDeceptor JSONL to unified dataset format.")
-    parser.add_argument("--input", required=False, default="CoTDeceptor_orig_dataset.jsonl", help="Input JSONL file path")
-    parser.add_argument("--output", required=False, default="CoTDeceptor_dataset.jsonl", help="Output JSONL file path")
+    parser.add_argument("--input", required=False, default="Dataset/CoTDeceptor/CoTDeceptor_orig_dataset.jsonl", help="Input JSONL file path")
+    parser.add_argument("--output", required=False, default="Dataset/CoTDeceptor/CoTDeceptor_dataset.jsonl", help="Output JSONL file path")
     parser.add_argument("--source", default="CoTDeceptor", help="Name for dataset_source")
     
     args = parser.parse_args()

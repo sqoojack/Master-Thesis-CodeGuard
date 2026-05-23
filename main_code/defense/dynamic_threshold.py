@@ -1,634 +1,646 @@
-"""
------------------------------------ Multiple Attack Types ------------------------------
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type ShadowCode INSEC XOXO -n 400
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type XOXO -n 400
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type  -n 400
+"""Dynamic threshold tuning for CodeGuard.
 
------------------------------------ Merged_dataset ------------------------------
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type Merged_all -n 400
-python main_code/defense/dynamic_threshold.py -attack_type Merged_all -n 400
-
------------------------------------ Adaptive Attack ------------------------------
-python main_code/defense/dynamic_threshold.py -attack_type adaptive_decoys -n 200
-
------------------------------------ CoTDeceptor ------------------------------
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type CoTDeceptor -n 200 --model_id Salesforce/codegen-350M-multi
-
------------------------------------ Multiple Attack Types ------------------------------
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type ShadowCode INSEC XOXO -n 400
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type XOXO -n 400
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type  -n 400
-
------------------------------------ Merged_dataset ------------------------------
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type Merged_all -n 400
-python main_code/defense/dynamic_threshold.py -attack_type merged -n 200 --model_id Qwen/Qwen3.5-4B
-
------------------------------------ Adaptive Attack ------------------------------
-python main_code/defense/dynamic_threshold.py -attack_type adaptive_decoys -n 200
-
------------------------------------ CoTDeceptor ------------------------------
-CUDA_VISIBLE_DEVICES=1 python main_code/defense/dynamic_threshold.py -attack_type CoTDeceptor -n 200 --model_id Salesforce/codegen-350M-multi
+Key changes compared with the previous version:
+1. Stage-1 has raw, node-type-specific features.
+2. Stage-2 uses the same adversarial trigger equation as runtime inference.
+3. Stage-3 uses surprise-gated semantic triggering.
+4. Thresholds are selected with train/validation/test splits; test is reported once.
 """
 
-import os
-import subprocess
-import json
+from __future__ import annotations
+
 import argparse
-import torch
-import numpy as np
 import itertools
-import ctypes
-from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from tree_sitter import Language, Parser, Query, QueryCursor
-from collections import defaultdict
+import json
+import os
 import random
-import re
-import filelock
-from typing import Dict, List, Any, Optional
-from pre_filter import PreFilter
-from Semantic_Guardrail import SemanticGuardrail
+from collections import defaultdict
+from datetime import datetime
+from typing import Any
+
+import numpy as np
+import torch
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+try:
+    from transformers import BitsAndBytesConfig
+except Exception:  # pragma: no cover
+    BitsAndBytesConfig = None
+
 from Adversarial_Guardrail import AdversarialGuardrail
+from Semantic_Guardrail import SemanticGuardrail
+from guardrail_common import (
+    NumpyEncoder,
+    SUPPORTED_LANGS,
+    adv_effective_score,
+    clean_dataset_metadata,
+    compute_metrics,
+    ensure_dirs,
+    f_beta_score,
+    metric_report_to_dict,
+    normalize_language,
+    resolve_dataset_paths,
+    set_seed,
+    setup_tree_sitter,
+    make_parser,
+)
+from pre_filter import PreFilter
 
-def set_seed(seed: int = 42) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-def clean_dataset_metadata(code_text: str) -> str:
-    if not code_text:
-        return ""
-    cleaned_code = re.sub(r'//\s*<(yes|no)>\s*<report>.*', '', code_text, flags=re.IGNORECASE)
-    cleaned_code = re.sub(r'/\*[\s\S]*?@(source|article|vulnerable_at_lines):[\s\S]*?\*/', '', cleaned_code)
-    return cleaned_code
-
-def setup_tree_sitter(lang_name: str) -> Language:
-    import subprocess
-    import os
-    import ctypes
-    import filelock
-    from tree_sitter import Language
-    
-    ts_dir = "build"
-    repo_name = f"tree-sitter-{lang_name}"
-    repo_dir = os.path.join(ts_dir, repo_name)
-    lib_path = os.path.join(ts_dir, f"{lang_name}.so")
-    
-    repo_map = {
-        "solidity": "https://github.com/JoranHonig/tree-sitter-solidity",
-        "java": "https://github.com/tree-sitter/tree-sitter-java",
-        "c": "https://github.com/tree-sitter/tree-sitter-c",
-        "python": "https://github.com/tree-sitter/tree-sitter-python",
-        "cpp": "https://github.com/tree-sitter/tree-sitter-cpp"
-    }
-    repo_url = repo_map.get(lang_name.lower(), f"https://github.com/tree-sitter/{repo_name}")
-    
-    if not os.path.exists(ts_dir):
-        os.makedirs(ts_dir)
-        
-    lock = filelock.FileLock(f"{lib_path}.lock")
-    
-    def build_library():
-        src_dir = os.path.join(repo_dir, "src")
-        parser_c = os.path.join(src_dir, "parser.c")
-        scanner_c = os.path.join(src_dir, "scanner.c")
-        scanner_cc = os.path.join(src_dir, "scanner.cc")
-        cmd = ["cc", "-shared", "-fPIC", "-I", src_dir, parser_c]
-        if os.path.exists(scanner_c):
-            cmd.append(scanner_c)
-        elif os.path.exists(scanner_cc):
-            cmd.append(scanner_cc)
-            cmd[0] = "c++"
-        cmd.extend(["-o", lib_path])
-        subprocess.run(cmd, check=True)
-
-    with lock:
-        if not os.path.exists(repo_dir):
-            subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
-        else:
-            subprocess.run(["git", "-C", repo_dir, "pull"], check=True)
-        if not os.path.exists(lib_path):
-            build_library()
-            
-        lib = ctypes.cdll.LoadLibrary(lib_path)
-        lang_func = getattr(lib, f"tree_sitter_{lang_name}")
-        lang_func.restype = ctypes.c_void_p
-         
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            return Language(lang_func())
-
-def detect_language(code_snippet: str) -> str:
-    if not code_snippet:
-        return "c"
-    code_lower = code_snippet.lower()
-    if "pragma solidity" in code_lower or "contract " in code_lower:
-        return "solidity"
-    if "public class " in code_lower or "import java." in code_lower or "system.out." in code_lower:
-        return "java"
-    if "def " in code_lower or "elif " in code_lower or "import " in code_lower and "java" not in code_lower:
-        return "python"
-    if "std::" in code_lower or "#include <iostream>" in code_lower or "namespace " in code_lower:
-        return "cpp"
-    if "#include" in code_lower or "printf(" in code_lower or "->_ops" in code_lower:
-        return "c"
-    return "c"
-
-def get_captures_from_query(query, root_node):
-    cursor = QueryCursor(query)
-    captures_dict = cursor.captures(root_node)
-    flat_captures = []
-    for type_name, nodes in captures_dict.items():
-        for node in nodes:
-            flat_captures.append((node, type_name))
-    # Restore original document order by sorting by start_byte
-    flat_captures.sort(key=lambda x: x[0].start_byte)
-    return flat_captures
 
 class DummyArgs:
-    def __init__(self, batch_size: int, lang: str = "c"):
+    def __init__(self, batch_size: int, batch_token_budget: int, lang: str = "c"):
         self.adversarial_threshold = 999.0
         self.th_string = 999.0
         self.l3_base_influence = 999.0
         self.l3_surprise_tolerance = 0.10
+        self.l3_min_surprise = 0.15
+        self.l3_z_trigger = 3.5
         self.batch_size = batch_size
+        self.batch_token_budget = batch_token_budget
         self.lang = lang
 
-def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5) -> float:
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    if (precision + recall) == 0:
-        f_beta = 0
-    else:
-        f_beta = (1 + beta**2) * (precision * recall) / ((beta**2 * precision) + recall)
 
-    fpr = fp / (fp + tn) if (tn + fp) > 0 else 0
-    max_allowed_fpr = 0.1
-    if fpr > max_allowed_fpr:
-        penalty = np.exp(-10 * (fpr - max_allowed_fpr))
-    else:
-        penalty = 1.0
-
-    return f_beta * penalty
-
-def extract_features(code: str, pre_filter: PreFilter, adv_guard: AdversarialGuardrail, sem_guard: SemanticGuardrail, parser: Parser, language: Language, args: DummyArgs, debug: bool = False) -> Dict[str, Any]:
-    features = {
-        "regex_triggered": False,
-        "s1_max_word": 0,
-        "s1_spec_str": 0.0,
-        "s1_spec_other": 0.0,
-        "s1_non_ascii": 0.0,
-        "adv_features": [],
-        "sem_features": [],
-        "code_snippet": code[:200].replace('\n', ' ') if code else "",
-        "full_code": code if code else ""
-    }
-    if not code:
-        return features
-
-    code_bytes = bytes(code, "utf8")
-    try:
-        tree = parser.parse(code_bytes)
-    except Exception:
-        return features
-        
-    nodes_to_scan = []
-    for query in [pre_filter.string_query, pre_filter.comment_query, pre_filter.identifier_query, pre_filter.error_query]:
-        for node, _ in get_captures_from_query(query, tree.root_node):
-            nodes_to_scan.append(node)
-            
-    detected, repaired_code, debug_info = pre_filter.detect(code)
-    regex_hit = False
-    for d in debug_info:
-        if "Regex_Match" in d["type"] or "Flashboom_Decoy" in d["type"] or "Suspicious_Identifier" in d["type"] or "Comment_Abnormal" in d["type"]:
-            regex_hit = True
-            
-    max_word = 0
-    max_spec_str = 0.0
-    max_spec_other = 0.0
-    max_non_ascii = 0.0
-
-    for node in nodes_to_scan:
-        text = node.text.decode("utf8", errors="ignore")
-        node_type = node.type
-        if len(text) >= 15 and node_type != 'comment':
-            if node_type not in ['string_literal', 'string']:
-                w_len = max((len(w) for w in text.split()), default=0)
-                max_word = max(max_word, w_len)
-
-            syntax_chars = set("{}[]()=><,.:-@")
-            risk_chars = set("$|\\\"'`~^%;&")
-            syntax_count = sum(1 for c in text if c in syntax_chars)
-            risk_count = sum(1 for c in text if c in risk_chars)
-
-            if node_type in ['string_literal', 'string']:
-                adjusted_special_count = (syntax_count * 0.5) + risk_count
-                spec_ratio = adjusted_special_count / len(text)
-                max_spec_str = max(max_spec_str, spec_ratio)
-            else:
-                adjusted_special_count = (syntax_count * 0.1) + risk_count
-                spec_ratio = adjusted_special_count / len(text)
-                max_spec_other = max(max_spec_other, spec_ratio)
-
-            non_ascii_count = sum(1 for c in text if ord(c) > 127)
-            if non_ascii_count > 5:
-                max_non_ascii = max(max_non_ascii, non_ascii_count / len(text))
-                
-    features["regex_triggered"] = regex_hit
-    features["s1_max_word"] = max_word
-    features["s1_spec_str"] = max_spec_str
-    features["s1_spec_other"] = max_spec_other
-    features["s1_non_ascii"] = max_non_ascii
-    
-    lang_name = getattr(pre_filter, 'lang_name', 'c')
-    comment_node = "(line_comment) @comment (block_comment) @comment" if lang_name == "java" else "(comment) @comment"
-    string_node = "(string) @string" if lang_name == "python" else "(string_literal) @string"
-    query_adv_str = f"{comment_node} {string_node} (identifier) @identifier"
-    query_adv = Query(language, query_adv_str)
-    captures_adv = get_captures_from_query(query_adv, tree.root_node)
-    
-    for node, type_name in captures_adv:
-        text = node.text.decode("utf8", errors='ignore')
-        if len(text) < 10:
-            continue
-
-        token_inputs = adv_guard.tokenizer([text[:3000]], return_tensors="pt", padding=True).to(adv_guard.device)
-        batch_losses, batch_masks = adv_guard.get_token_losses(token_inputs["input_ids"], token_inputs["attention_mask"])
-        valid_loss = batch_losses[0][batch_masks[0] == 1]
-        score = adv_guard.calc_mink_score_from_losses(valid_loss, len(valid_loss), node_type=type_name)
-
-        whitelisted = adv_guard.is_whitelisted(text)
-
-        length_penalty = 0.0
-        if type_name == 'comment':
-            if len(text) < 40:
-                length_penalty = 5.0 * (1.0 - (len(text) / 40.0))
-
-        features["adv_features"].append({
-            "type": type_name,
-            "score": float(score),
-            "length_penalty": float(length_penalty),
-            "whitelisted": whitelisted
-        })
-        
-    features["sem_features"] = sem_guard.extract_semantic_features(code)
-
-    return features
-
-def prepare_vector_data(extracted_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    n = len(extracted_data)
-    labels = np.array([item["label"] for item in extracted_data], dtype=np.int32)
-
-    regex_triggered = np.array([item.get("regex_triggered", False) for item in extracted_data], dtype=bool)
-    s1_max_word = np.array([item.get("s1_max_word", 0) for item in extracted_data], dtype=np.int32)
-    s1_spec_str = np.array([item.get("s1_spec_str", 0.0) for item in extracted_data], dtype=np.float32)
-    s1_spec_other = np.array([item.get("s1_spec_other", 0.0) for item in extracted_data], dtype=np.float32)
-    s1_non_ascii = np.array([item.get("s1_non_ascii", 0.0) for item in extracted_data], dtype=np.float32)
-    
-    adv_comment_max = np.full(n, -999.0)
-    adv_string_max = np.full(n, -999.0)
-    adv_id_max = np.full(n, -999.0)
-
-    for i, item in enumerate(extracted_data):
-        for f in item.get("adv_features", []):
-            score = f["score"]
-            if f["type"] == 'comment':
-                penalty = f.get("length_penalty", 0.0)
-                adj_score = (score / 1.5 if f.get("whitelisted", False) else score) - penalty
-                adv_comment_max[i] = max(adv_comment_max[i], adj_score)
-            elif f["type"] == 'string':
-                adv_string_max[i] = max(adv_string_max[i], score)
-            elif f["type"] == 'identifier':
-                adv_id_max[i] = max(adv_id_max[i], score)
-                
-    sem_sample_indices = []
-    sem_influences = []
-    sem_surprises = []
-    sem_factors = []
-
-    for i, item in enumerate(extracted_data):
-        for f in item.get("sem_features", []):
-            factor = f.get("factor", 1.0)
-            sem_sample_indices.append(i)
-            sem_influences.append(f["influence"])
-            sem_surprises.append(f["surprise"])
-            sem_factors.append(factor)
-            
-    return {
-        "labels": labels,
-        "s1_regex": regex_triggered,
-        "s1_word": s1_max_word,
-        "s1_spec_str": s1_spec_str,
-        "s1_spec_other": s1_spec_other,
-        "s1_non_ascii": s1_non_ascii,
-        "adv_comment_max": adv_comment_max,
-        "adv_string_max": adv_string_max,
-        "adv_id_max": adv_id_max,
-        "sem": {
-            "indices": np.array(sem_sample_indices, dtype=np.int32),
-            "influence": np.array(sem_influences, dtype=np.float32),
-            "surprise": np.array(sem_surprises, dtype=np.float32),
-            "factor": np.array(sem_factors, dtype=np.float32)
-        }
-    }
-
-def simulate_pipeline_vectorized(v_data: Dict[str, Any], th_adv: float, th_str: float, th_l3: float, t_l3: float, th_s1_w: int, th_s1_s: float, th_s1_o: float, th_s1_a: float) -> Dict[str, int]:
-    n = len(v_data["labels"])
-    y_true = v_data["labels"]
-
-    s1_det = v_data["s1_regex"] | (v_data["s1_word"] > th_s1_w) | (v_data["s1_spec_str"] > th_s1_s) | (v_data["s1_spec_other"] > th_s1_o) | (v_data["s1_non_ascii"] > th_s1_a)
-
-    s2_det = (v_data["adv_comment_max"] > th_adv) | (v_data["adv_string_max"] > th_str) | (v_data["adv_id_max"] > th_adv)
-    
-    sem = v_data["sem"]
-    s3_det = np.zeros(n, dtype=bool)
-
-    if len(sem["indices"]) > 0:
-        dyn_thresholds = (th_l3 * sem["factor"]) / (1.0 + (sem["surprise"] * t_l3))
-        triggered_nodes = sem["influence"] > dyn_thresholds
-        sem_triggered_counts = np.bincount(sem["indices"], weights=triggered_nodes.astype(np.int32), minlength=n)
-        s3_det = (sem_triggered_counts > 0)
-        
-    is_detected_union = s1_det | s2_det | s3_det
-    
-    s1_tp = np.sum((s1_det == True) & (y_true == 1))
-    s1_fp = np.sum((s1_det == True) & (y_true == 0))
-
-    s2_tp = np.sum((s2_det == True) & (y_true == 1))
-    s2_fp = np.sum((s2_det == True) & (y_true == 0))
-
-    s3_tp = np.sum((s3_det == True) & (y_true == 1))
-    s3_fp = np.sum((s3_det == True) & (y_true == 0))
-
-    tp = np.sum((is_detected_union == True) & (y_true == 1))
-    fp = np.sum((is_detected_union == True) & (y_true == 0))
-    fn = np.sum((is_detected_union == False) & (y_true == 1))
-    tn = np.sum((is_detected_union == False) & (y_true == 0))
-    
-    return {
-        "tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn),
-        "s1_tp": int(s1_tp), "s1_fp": int(s1_fp),
-        "s2_tp": int(s2_tp), "s2_fp": int(s2_fp),
-        "s3_tp": int(s3_tp), "s3_fp": int(s3_fp)
-    }
-
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("-attack_type", "--attack_type", nargs='+', type=str, required=True, help="List of attack types to process")
+    parser.add_argument("-attack_type", "--attack_type", nargs="+", type=str, required=True)
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-mono")
-    parser.add_argument("-n", "--num_samples", type=int, default=300)
-    parser.add_argument("-bs", "--batch_size", type=int, default=16)
+    parser.add_argument("-n", "--num_samples", type=int, default=300, help="Total samples. Half benign, half adversarial.")
+    parser.add_argument("-bs", "--batch_size", type=int, default=8)
+    parser.add_argument("--batch_token_budget", type=int, default=2048)
     parser.add_argument("--max_fpr", type=float, default=0.10)
     parser.add_argument("--beta", type=float, default=1.5)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--default_lang", type=str, default="c")
-    parser.add_argument("--debug_limit", type=int, default=3)
+    parser.add_argument("--train_ratio", type=float, default=0.60)
+    parser.add_argument("--val_ratio", type=float, default=0.20)
+    parser.add_argument("--test_ratio", type=float, default=0.20)
+    parser.add_argument("--max_grid_trials", type=int, default=3000)
+    parser.add_argument("--out_dir", type=str, default="result/debug_logs", help="Root output directory. Results are written to {out_dir}/{attack_type}.")
+    parser.add_argument("--debug_limit", type=int, default=20)
+    parser.add_argument("--no_4bit", action="store_true", help="Disable 4-bit loading. Useful when bitsandbytes is unavailable.")
+    parser.add_argument("--pull_tree_sitter", action="store_true")
+    return parser
 
-    args_cmd = parser.parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    print(f"[-] Load model: {args_cmd.model_id}...")
-    set_seed(42)
-    torch.set_float32_matmul_precision('high')
-    
-    tokenizer = AutoTokenizer.from_pretrained(args_cmd.model_id)
+
+def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5, max_allowed_fpr: float = 0.10) -> float:
+    fpr = fp / (fp + tn) if (tn + fp) > 0 else 0.0
+    if fpr > max_allowed_fpr:
+        return -1.0
+    return f_beta_score(tp, fp, fn, beta=beta)
+
+
+def load_model_and_tokenizer(args: argparse.Namespace):
+    print(f"[-] Load model: {args.model_id}")
+    tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-        
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16
-    )
-    
-    model_kwargs = {
-        "quantization_config": bnb_config,
-        "device_map": "auto"
-    }
-    
-    # Exclude sdpa for CodeGen models as they lack support
-    if "codegen" not in args_cmd.model_id.lower():
+
+    model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
+    if not args.no_4bit and BitsAndBytesConfig is not None:
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+    else:
+        model_kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
+    if "codegen" not in args.model_id.lower():
         model_kwargs["attn_implementation"] = "sdpa"
 
-    model = AutoModelForCausalLM.from_pretrained(args_cmd.model_id, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(args.model_id, **model_kwargs)
     model.eval()
-    
     device = model.device if hasattr(model, "device") else next(model.parameters()).device
-    
-    supported_langs = ["c", "java", "solidity", "python", "cpp"]
+    return model, tokenizer, device
+
+
+def build_guardrails(args: argparse.Namespace, model, tokenizer, device):
     guardrails = {}
-
-    for lang in supported_langs:
+    for lang in SUPPORTED_LANGS:
         try:
-            target_language = setup_tree_sitter(lang)
-            # Instantiate parser with language directly for tree-sitter >= 0.21.0
-            ts_parser = Parser(target_language)
-            args_dummy = DummyArgs(args_cmd.batch_size, lang)
-
+            target_language = setup_tree_sitter(lang, pull_existing=args.pull_tree_sitter)
+            ts_parser = make_parser(target_language)
+            dummy = DummyArgs(args.batch_size, args.batch_token_budget, lang)
             guardrails[lang] = {
                 "pre_filter": PreFilter(ts_parser, target_language, lang_name=lang),
-                "adv_guard": AdversarialGuardrail(model, tokenizer, device, ts_parser, target_language, args_dummy),
-                "sem_guard": SemanticGuardrail(model, tokenizer, device, ts_parser, target_language, args_dummy),
+                "adv_guard": AdversarialGuardrail(model, tokenizer, device, ts_parser, target_language, dummy),
+                "sem_guard": SemanticGuardrail(model, tokenizer, device, ts_parser, target_language, dummy),
                 "parser": ts_parser,
                 "language": target_language,
-                "args_dummy": args_dummy
             }
-        except Exception as e:
-            print(f"[!] Failed to setup for {lang}: {e}")
-            
+            print(f"[+] Tree-sitter ready: {lang}")
+        except Exception as exc:
+            print(f"[!] Failed to setup {lang}: {exc}")
     if not guardrails:
-        print("[!] Critical Error: Failed to setup any language guardrails. Exiting.")
-        return
+        raise RuntimeError("Failed to setup any language guardrails.")
+    return guardrails
 
-    files_to_load = set()
-    for atype in args_cmd.attack_type:
-        if atype == "adaptive_decoys":
-            path = "Dataset/Adaptive_attack/decoys_attack.jsonl"
-        elif atype == "adaptive_copy":
-            path = "Dataset/Adaptive_attack/copy_trigger_attack.jsonl"
-        elif atype == "adaptive_contextual":
-            path = "Dataset/Adaptive_attack/contextual_attack.jsonl"
-        else:
-            path = f"Dataset/{atype}/{atype}_dataset.jsonl"
-        files_to_load.add(path)
-        
-    if not files_to_load:
-        print("[!] No valid dataset paths found for the requested attack types. Exiting.")
-        return
-        
-    grouped_entries = defaultdict(list)
+
+def load_pairs(args: argparse.Namespace) -> list[dict[str, Any]]:
+    files_to_load = sorted(resolve_dataset_paths(args.attack_type))
+    pairs = []
     for file_path in files_to_load:
         if not os.path.exists(file_path):
             print(f"[!] File not found: {file_path}")
             continue
-
-        print(f"[-] Loading dataset from: {file_path}")
-        with open(file_path, 'r', encoding='utf-8') as f:
+        print(f"[-] Loading dataset: {file_path}")
+        with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
-                if not line.strip(): continue
+                if not line.strip():
+                    continue
                 try:
                     entry = json.loads(line)
-                    lang = entry.get("language", entry.get("lang", ""))
-                    code = entry.get("code", "")
-                    adv_code = entry.get("adv_code", "")
-
-                    if code and adv_code:
-                        clean_code = clean_dataset_metadata(code)
-                        clean_adv = clean_dataset_metadata(adv_code)
-                        attack_type = entry.get("dataset_source", "unknown")
-                        
-                        grouped_entries[attack_type].append({
-                            "benign": {"code": clean_code, "lang": lang},
-                            "adv": {"code": clean_adv, "lang": lang}
-                        })
                 except Exception:
-                    pass
-                    
-    for atype in grouped_entries:
-        random.shuffle(grouped_entries[atype])
-        
-    num_pairs_needed = args_cmd.num_samples // 2
-    selected_pairs = []
-    active_groups = list(grouped_entries.keys())
+                    continue
 
-    while len(selected_pairs) < num_pairs_needed and active_groups:
-        for atype in list(active_groups):
-            if grouped_entries[atype]:
-                selected_pairs.append(grouped_entries[atype].pop(0))
-                if len(selected_pairs) == num_pairs_needed:
+                code = clean_dataset_metadata(entry.get("code", ""))
+                adv_code = clean_dataset_metadata(entry.get("adv_code", ""))
+                if not code or not adv_code:
+                    continue
+
+                source = entry.get("dataset_source") or entry.get("attack_type") or os.path.basename(file_path)
+                lang = entry.get("language", entry.get("lang", ""))
+                pairs.append(
+                    {
+                        "source": source,
+                        "benign": {"code": code, "lang": lang},
+                        "adv": {"code": adv_code, "lang": lang},
+                    }
+                )
+    return pairs
+
+
+def balanced_select_pairs(pairs: list[dict[str, Any]], num_pairs_needed: int, seed: int) -> list[dict[str, Any]]:
+    rng = random.Random(seed)
+    grouped = defaultdict(list)
+    for pair in pairs:
+        grouped[pair["source"]].append(pair)
+    for group in grouped.values():
+        rng.shuffle(group)
+
+    selected = []
+    active_groups = list(grouped.keys())
+    while len(selected) < num_pairs_needed and active_groups:
+        for source in list(active_groups):
+            if grouped[source]:
+                selected.append(grouped[source].pop(0))
+                if len(selected) >= num_pairs_needed:
                     break
             else:
-                active_groups.remove(atype)
-                
-    print(f"[-] Selected {len(selected_pairs)} pairs ({len(selected_pairs)*2} samples) from {len(grouped_entries.keys())} attack types.")
-    
-    extracted_data = []
+                active_groups.remove(source)
+    return selected
 
-    for i, pair in enumerate(tqdm(selected_pairs, desc="Extract benign")):
-        code = pair["benign"]["code"]
-        lang = pair["benign"]["lang"] if pair["benign"]["lang"] else detect_language(code)
-        lang = lang.lower()
-        if lang not in supported_langs:
-            lang = args_cmd.default_lang
 
-        g = guardrails.get(lang, guardrails[args_cmd.default_lang])
-        feat = extract_features(code, g["pre_filter"], g["adv_guard"], g["sem_guard"], g["parser"], g["language"], g["args_dummy"], debug=(i < args_cmd.debug_limit))
-        feat["label"] = 0
-        extracted_data.append(feat)
-        
-    for i, pair in enumerate(tqdm(selected_pairs, desc="Extract adv")):
-        code = pair["adv"]["code"]
-        lang = pair["adv"]["lang"] if pair["adv"]["lang"] else detect_language(code)
-        lang = lang.lower()
-        if lang not in supported_langs:
-            lang = args_cmd.default_lang
+def split_pairs(pairs: list[dict[str, Any]], train_ratio: float, val_ratio: float, test_ratio: float, seed: int):
+    ratio_sum = train_ratio + val_ratio + test_ratio
+    if ratio_sum <= 0:
+        raise ValueError("train/val/test ratios must sum to a positive value")
+    train_ratio, val_ratio, test_ratio = train_ratio / ratio_sum, val_ratio / ratio_sum, test_ratio / ratio_sum
 
-        g = guardrails.get(lang, guardrails[args_cmd.default_lang])
-        feat = extract_features(code, g["pre_filter"], g["adv_guard"], g["sem_guard"], g["parser"], g["language"], g["args_dummy"], debug=(i < args_cmd.debug_limit))
-        feat["label"] = 1
-        extracted_data.append(feat)
-        
-    v_data = prepare_vector_data(extracted_data)
-    
-    print(f"\n[-] Start Grid Search (Beta={args_cmd.beta}, Max FPR={args_cmd.max_fpr})...")
+    rng = random.Random(seed)
+    grouped = defaultdict(list)
+    for pair in pairs:
+        grouped[pair["source"]].append(pair)
 
-    s1_w_space = [50, 100, 150, 200]
-    s1_s_space = [0.05, 0.1, 0.2, 0.4]
-    s1_o_space = [0.1, 0.3, 0.5]
-    s1_a_space = [0.001, 0.05, 0.40, 0.60, 0.80]
+    splits = {"train": [], "val": [], "test": []}
+    for source, group in grouped.items():
+        rng.shuffle(group)
+        n = len(group)
+        n_train = int(round(n * train_ratio))
+        n_val = int(round(n * val_ratio))
+        if n >= 3:
+            n_train = max(1, min(n_train, n - 2))
+            n_val = max(1, min(n_val, n - n_train - 1))
+        else:
+            n_train = max(1, min(n_train, n))
+            n_val = 0
+        splits["train"].extend(group[:n_train])
+        splits["val"].extend(group[n_train : n_train + n_val])
+        splits["test"].extend(group[n_train + n_val :])
 
-    adv_th_space = np.arange(5.0, 20.0, 1.0)
-    str_th_space = np.arange(5.0, 20.0, 1.0)
-    l3_th_space = np.arange(0.010, 0.300, 0.05)
-    l3_tolerance_space = [0.01, 0.05, 0.10, 0.20, 0.30]
+    # If a tiny dataset left val/test empty, fall back to a global shuffle split.
+    if not splits["val"] or not splits["test"]:
+        shuffled = list(pairs)
+        rng.shuffle(shuffled)
+        n = len(shuffled)
+        n_train = max(1, int(n * train_ratio))
+        n_val = max(1, int(n * val_ratio)) if n >= 3 else 0
+        splits = {
+            "train": shuffled[:n_train],
+            "val": shuffled[n_train : n_train + n_val],
+            "test": shuffled[n_train + n_val :],
+        }
+    return splits
 
-    param_grid = list(itertools.product(adv_th_space, str_th_space, l3_th_space, l3_tolerance_space, s1_w_space, s1_s_space, s1_o_space, s1_a_space))
 
-    best_score = -1.0
-    best_params, best_metrics = {}, {}
-    fallback_metrics, fallback_params = {"fpr": 1.0}, {}
+def extract_one(code: str, lang: str, guardrails, default_lang: str) -> dict[str, Any]:
+    lang = normalize_language(lang, code, default_lang)
+    g = guardrails.get(lang) or guardrails.get(default_lang) or next(iter(guardrails.values()))
+    pre = g["pre_filter"]
+    adv = g["adv_guard"]
+    sem = g["sem_guard"]
 
-    pbar = tqdm(total=len(param_grid), desc="Optimizing")
-    for th_adv, th_str, th_l3, t_l3, th_s1_w, th_s1_s, th_s1_o, th_s1_a in param_grid:
-        res = simulate_pipeline_vectorized(v_data, th_adv, th_str, th_l3, t_l3, th_s1_w, th_s1_s, th_s1_o, th_s1_a)
-        
-        score = objective_function(res["tp"], res["fp"], res["fn"], res["tn"], beta=args_cmd.beta)
-        current_fpr = res["fp"] / (res["fp"] + res["tn"]) if (res["fp"] + res["tn"]) > 0 else 0
+    features = pre.extract_threshold_features(code)
+    features["adv_features"] = adv.extract_adv_features(code)
+    features["sem_features"] = sem.extract_semantic_features(code)
+    return features
 
-        if current_fpr < fallback_metrics["fpr"]:
-            fallback_metrics = res.copy()
-            fallback_metrics["fpr"] = current_fpr
-            fallback_params = {"th_adv": th_adv, "th_str": th_str, "th_l3": th_l3, "t_l3": t_l3, "th_s1_w": th_s1_w, "th_s1_s": th_s1_s, "th_s1_o": th_s1_o, "th_s1_a": th_s1_a}
 
-        if score > best_score:
-            best_score = score
-            best_metrics = res.copy()
-            best_metrics["fpr"] = current_fpr
-            best_params = {"th_adv": th_adv, "th_str": th_str, "th_l3": th_l3, "t_l3": t_l3, "th_s1_w": th_s1_w, "th_s1_s": th_s1_s, "th_s1_o": th_s1_o, "th_s1_a": th_s1_a}
-            
-        pbar.update(1)
-    pbar.close()
-    
-    if best_score <= 0:
-        best_params, best_metrics = fallback_params, fallback_metrics
-        
-    tp, fp, fn, tn = best_metrics["tp"], best_metrics["fp"], best_metrics["fn"], best_metrics["tn"]
-    prec = tp / (tp + fp) if (tp + fp) > 0 else 0
-    rec = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
-    
-    print("\n" + "="*50 + "\nOptimization Done!\n" + "="*50)
-    print(f"Best Params (Stage 1):")
-    print(f"  Max Word Len: {best_params['th_s1_w']}")
-    print(f"  Spec Ratio (Str): {best_params['th_s1_s']:.2f}")
-    print(f"  Spec Ratio (Other): {best_params['th_s1_o']:.2f}")
-    print(f"  Non-ASCII Ratio: {best_params['th_s1_a']:.2f}")
-    
-    print(f"\nBest Params (Stage 2 & 3):")
-    print(f"  Adv TH: {best_params['th_adv']:.2f}, String TH: {best_params['th_str']:.2f}")
-    print(f"  L3 Base: {best_params['th_l3']:.3f}, L3 Tol: {best_params['t_l3']:.2f}")
-    
-    print(f"\nValidation Performance:\n  Score (Obj): {best_score:.4f}\n  F1-Score: {f1:.4f}\n  Precision: {prec:.4f}\n  Recall: {rec:.4f}\n  FPR: {best_metrics['fpr']:.4f} ({fp} FP)")
-    print(f"\nLayer Breakdown:\n  Stage 1 (Regex+Anomaly): TP={best_metrics['s1_tp']}, FP={best_metrics['s1_fp']}")
-    print(f"  Stage 2 (Adv):           TP={best_metrics['s2_tp']}, FP={best_metrics['s2_fp']}")
-    print(f"  Stage 3 (Sem):           TP={best_metrics['s3_tp']}, FP={best_metrics['s3_fp']}")
-    print("="*50)
-    
-    log_dir_name = "_".join(args_cmd.attack_type)
-    log_dir = f"result/debug_logs/{log_dir_name}"
-    os.makedirs(log_dir, exist_ok=True)
+def extract_split_records(splits, guardrails, args: argparse.Namespace) -> list[dict[str, Any]]:
+    records = []
+    for split_name, pairs in splits.items():
+        for idx, pair in enumerate(tqdm(pairs, desc=f"Extract {split_name}", ncols=100)):
+            for label_name, label in (("benign", 0), ("adv", 1)):
+                item = pair[label_name]
+                code = item["code"]
+                lang = normalize_language(item.get("lang"), code, args.default_lang)
+                feat = extract_one(code, lang, guardrails, args.default_lang)
+                feat.update(
+                    {
+                        "label": label,
+                        "split": split_name,
+                        "source": pair["source"],
+                        "kind": label_name,
+                        "lang": lang,
+                        "pair_id": idx,
+                        "full_code": code,
+                        "code_snippet": code[:200].replace("\n", " "),
+                    }
+                )
+                records.append(feat)
+    return records
 
-    param_export_path = os.path.join(log_dir, "optimal_params.json")
-    with open(param_export_path, "w", encoding="utf-8") as f:
-        json.dump(best_params, f, indent=4)
-        
-    fp_list, fn_list = [], []
-    for feat in extracted_data:
-        label = feat["label"]
-        s1 = feat["regex_triggered"] or (feat["s1_max_word"] > best_params['th_s1_w']) or (feat["s1_spec_str"] > best_params['th_s1_s']) or (feat["s1_spec_other"] > best_params['th_s1_o']) or (feat["s1_non_ascii"] > best_params['th_s1_a'])
-        s2 = any(f["score"] > (best_params['th_adv'] + f['length_penalty'] if f['type']=='comment' else best_params['th_str'] if f['type']=='string' else best_params['th_adv']) for f in feat["adv_features"])
-        s3 = any(f["influence"] > (best_params['th_l3'] * f.get('factor', 1.0) / (1.0 + (f["surprise"] * best_params['t_l3']))) for f in feat["sem_features"])
 
-        detected = s1 or s2 or s3
-        entry = {"label": label, "code": feat["full_code"], "triggers": {"s1": s1, "s2": s2, "s3": s3}}
+def prepare_vector_data(records: list[dict[str, Any]]) -> dict[str, Any]:
+    n = len(records)
+    labels = np.array([item["label"] for item in records], dtype=np.int32)
 
-        if label == 0 and detected:
-            fp_list.append(entry)
-        elif label == 1 and not detected:
-            fn_list.append(entry)
-            
-    with open(os.path.join(log_dir, "fp_samples.jsonl"), "w", encoding="utf-8") as f:
-        for item in fp_list: f.write(json.dumps(item) + "\n")
+    v_data: dict[str, Any] = {
+        "records": records,
+        "labels": labels,
+        "split": np.array([item["split"] for item in records], dtype=object),
+        "s1_hard": np.array([bool(item.get("s1_hard", False)) for item in records], dtype=bool),
+        "s1_word": np.array([item.get("s1_max_word", 0) for item in records], dtype=np.float32),
+        "s1_spec_string": np.array([item.get("s1_spec_string", 0.0) for item in records], dtype=np.float32),
+        "s1_spec_identifier": np.array([item.get("s1_spec_identifier", 0.0) for item in records], dtype=np.float32),
+        "s1_spec_comment": np.array([item.get("s1_spec_comment", 0.0) for item in records], dtype=np.float32),
+        "s1_spec_error": np.array([item.get("s1_spec_error", 0.0) for item in records], dtype=np.float32),
+        "s1_non_ascii": np.array([item.get("s1_non_ascii", 0.0) for item in records], dtype=np.float32),
+    }
 
-    with open(os.path.join(log_dir, "fn_samples.jsonl"), "w", encoding="utf-8") as f:
-        for item in fn_list: f.write(json.dumps(item) + "\n")
-        
-    print(f"[-] Saved FP ({len(fp_list)}) and FN ({len(fn_list)}) logs to {log_dir}")
+    adv_comment_eff = np.full(n, -999.0, dtype=np.float32)
+    adv_string_eff = np.full(n, -999.0, dtype=np.float32)
+    adv_id_eff = np.full(n, -999.0, dtype=np.float32)
+    for i, item in enumerate(records):
+        for feature in item.get("adv_features", []):
+            kind, eff = adv_effective_score(feature)
+            if kind == "comment":
+                adv_comment_eff[i] = max(adv_comment_eff[i], eff)
+            elif kind == "string":
+                adv_string_eff[i] = max(adv_string_eff[i], eff)
+            elif kind == "identifier":
+                adv_id_eff[i] = max(adv_id_eff[i], eff)
+
+    v_data.update(
+        {
+            "adv_comment_eff": adv_comment_eff,
+            "adv_string_eff": adv_string_eff,
+            "adv_id_eff": adv_id_eff,
+        }
+    )
+
+    sem_indices, sem_influences, sem_surprises, sem_factors, sem_z_scores = [], [], [], [], []
+    for i, item in enumerate(records):
+        for feature in item.get("sem_features", []):
+            sem_indices.append(i)
+            sem_influences.append(float(feature.get("influence", 0.0)))
+            sem_surprises.append(float(feature.get("surprise", 0.0)))
+            sem_factors.append(float(feature.get("factor", 1.0)))
+            sem_z_scores.append(float(feature.get("z_score", 0.0)))
+
+    v_data["sem"] = {
+        "indices": np.array(sem_indices, dtype=np.int32),
+        "influence": np.array(sem_influences, dtype=np.float32),
+        "surprise": np.array(sem_surprises, dtype=np.float32),
+        "factor": np.array(sem_factors, dtype=np.float32),
+        "z_score": np.array(sem_z_scores, dtype=np.float32),
+    }
+    return v_data
+
+
+def mask_split(v_data: dict[str, Any], split: str) -> np.ndarray:
+    return v_data["split"] == split
+
+
+def simulate_pipeline_vectorized(v_data: dict[str, Any], params: dict[str, Any], mask: np.ndarray | None = None) -> dict[str, Any]:
+    n_total = len(v_data["labels"])
+    if mask is None:
+        mask = np.ones(n_total, dtype=bool)
+    selected_indices = np.where(mask)[0]
+    local_pos = {int(global_idx): pos for pos, global_idx in enumerate(selected_indices)}
+    n = len(selected_indices)
+
+    y_true = v_data["labels"][mask]
+
+    s1_det_full = (
+        v_data["s1_hard"]
+        | (v_data["s1_word"] > params["th_s1_w"])
+        | (v_data["s1_spec_string"] > params["th_s1_str"])
+        | (v_data["s1_spec_identifier"] > params["th_s1_identifier"])
+        | (v_data["s1_spec_comment"] > params["th_s1_comment"])
+        | (v_data["s1_spec_error"] > params["th_s1_error"])
+        | (v_data["s1_non_ascii"] > params["th_s1_a"])
+    )
+    s1_det = s1_det_full[mask]
+
+    s2_det_full = (
+        (v_data["adv_comment_eff"] > params["th_adv"])
+        | (v_data["adv_string_eff"] > params["th_str"])
+        | (v_data["adv_id_eff"] > params["th_adv"])
+    )
+    s2_det = s2_det_full[mask]
+
+    s3_det = np.zeros(n, dtype=bool)
+    sem = v_data["sem"]
+    if len(sem["indices"]) > 0 and n > 0:
+        global_mask_lookup = set(int(i) for i in selected_indices)
+        sem_global_indices = sem["indices"]
+        keep = np.array([int(i) in global_mask_lookup for i in sem_global_indices], dtype=bool)
+        if np.any(keep):
+            kept_globals = sem_global_indices[keep]
+            local_indices = np.array([local_pos[int(g)] for g in kept_globals], dtype=np.int32)
+            min_threshold = params["th_l3"] * 0.1
+            dyn_thresholds = np.maximum(
+                min_threshold,
+                (params["th_l3"] * sem["factor"][keep]) / (1.0 + (sem["surprise"][keep] * params["t_l3"])),
+            )
+            triggered_nodes = (
+                (sem["surprise"][keep] >= params["l3_min_surprise"])
+                & ((sem["influence"][keep] > dyn_thresholds) | (sem["z_score"][keep] > params["l3_z_trigger"]))
+            )
+            sem_triggered_counts = np.bincount(local_indices, weights=triggered_nodes.astype(np.int32), minlength=n)
+            s3_det = sem_triggered_counts > 0
+
+    detected = s1_det | s2_det | s3_det
+
+    tp = int(np.sum((detected == True) & (y_true == 1)))
+    fp = int(np.sum((detected == True) & (y_true == 0)))
+    fn = int(np.sum((detected == False) & (y_true == 1)))
+    tn = int(np.sum((detected == False) & (y_true == 0)))
+
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "s1_tp": int(np.sum((s1_det == True) & (y_true == 1))),
+        "s1_fp": int(np.sum((s1_det == True) & (y_true == 0))),
+        "s2_tp": int(np.sum((s2_det == True) & (y_true == 1))),
+        "s2_fp": int(np.sum((s2_det == True) & (y_true == 0))),
+        "s3_tp": int(np.sum((s3_det == True) & (y_true == 1))),
+        "s3_fp": int(np.sum((s3_det == True) & (y_true == 0))),
+        "y_true": y_true,
+        "detected": detected,
+        "s1_det": s1_det,
+        "s2_det": s2_det,
+        "s3_det": s3_det,
+        "selected_indices": selected_indices,
+    }
+
+
+def default_param_candidates() -> list[dict[str, Any]]:
+    return [
+        {
+            "th_adv": 16.0,
+            "th_str": 15.0,
+            "th_l3": 0.26,
+            "t_l3": 0.01,
+            "l3_min_surprise": 0.15,
+            "l3_z_trigger": 3.5,
+            "th_s1_w": 50,
+            "th_s1_str": 0.25,
+            "th_s1_identifier": 0.35,
+            "th_s1_comment": 0.45,
+            "th_s1_error": 0.08,
+            "th_s1_a": 0.001,
+        },
+        {
+            "th_adv": 18.0,
+            "th_str": 15.0,
+            "th_l3": 0.26,
+            "t_l3": 0.05,
+            "l3_min_surprise": 0.20,
+            "l3_z_trigger": 3.5,
+            "th_s1_w": 100,
+            "th_s1_str": 0.35,
+            "th_s1_identifier": 0.35,
+            "th_s1_comment": 0.45,
+            "th_s1_error": 0.08,
+            "th_s1_a": 0.001,
+        },
+    ]
+
+
+def generate_param_candidates(max_trials: int, seed: int) -> list[dict[str, Any]]:
+    spaces = {
+        "th_adv": [8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0],
+        "th_str": [8.0, 10.0, 12.0, 15.0, 18.0, 20.0, 22.0],
+        "th_l3": [0.02, 0.05, 0.08, 0.12, 0.16, 0.20, 0.26, 0.32],
+        "t_l3": [0.01, 0.05, 0.10, 0.20, 0.30],
+        "l3_min_surprise": [0.05, 0.10, 0.15, 0.20, 0.30],
+        "l3_z_trigger": [3.0, 3.5, 4.0, 4.5],
+        "th_s1_w": [50, 100, 150, 200],
+        "th_s1_str": [0.10, 0.18, 0.22, 0.25, 0.35, 0.45],
+        "th_s1_identifier": [0.10, 0.20, 0.28, 0.35, 0.45],
+        "th_s1_comment": [0.25, 0.35, 0.45, 0.55],
+        "th_s1_error": [0.06, 0.08, 0.12, 0.18, 0.25],
+        "th_s1_a": [0.001, 0.01, 0.05, 0.15, 0.40],
+    }
+
+    keys = list(spaces.keys())
+    rng = random.Random(seed)
+    candidates = default_param_candidates()
+    seen = {tuple(sorted(c.items())) for c in candidates}
+
+    # Full product is intentionally huge; sample deterministically.
+    while len(candidates) < max_trials:
+        params = {key: rng.choice(spaces[key]) for key in keys}
+        key = tuple(sorted(params.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(params)
+    return candidates
+
+
+def select_best_params(v_data: dict[str, Any], candidates: list[dict[str, Any]], args: argparse.Namespace):
+    train_mask = mask_split(v_data, "train")
+    val_mask = mask_split(v_data, "val")
+
+    best = None
+    fallback = None
+
+    for params in tqdm(candidates, desc="Search thresholds", ncols=100):
+        train = simulate_pipeline_vectorized(v_data, params, train_mask)
+        train_score = objective_function(train["tp"], train["fp"], train["fn"], train["tn"], args.beta, args.max_fpr)
+        train_metrics = compute_metrics(train["tp"], train["fp"], train["fn"], train["tn"])
+
+        fallback_key = (train_score, train_metrics.recall, -train_metrics.fpr, train_metrics.precision)
+        if fallback is None or fallback_key > fallback["key"]:
+            fallback = {"params": params, "train": train, "train_score": train_score, "key": fallback_key}
+
+        if train_score < 0:
+            continue
+
+        val = simulate_pipeline_vectorized(v_data, params, val_mask)
+        val_score = objective_function(val["tp"], val["fp"], val["fn"], val["tn"], args.beta, args.max_fpr)
+        val_metrics = compute_metrics(val["tp"], val["fp"], val["fn"], val["tn"])
+        train_key = (val_score, train_score, val_metrics.recall, -val_metrics.fpr, val_metrics.precision)
+        if best is None or train_key > best["key"]:
+            best = {
+                "params": params,
+                "train": train,
+                "val": val,
+                "train_score": train_score,
+                "val_score": val_score,
+                "key": train_key,
+            }
+
+    if best is None:
+        print("[!] No candidate satisfied the train FPR constraint. Falling back to best train objective.")
+        params = fallback["params"]
+        best = {
+            "params": params,
+            "train": fallback["train"],
+            "val": simulate_pipeline_vectorized(v_data, params, val_mask),
+            "train_score": fallback["train_score"],
+            "val_score": -1.0,
+        }
+    return best
+
+
+def summarize_counts(result: dict[str, Any]) -> dict[str, Any]:
+    metrics = compute_metrics(result["tp"], result["fp"], result["fn"], result["tn"])
+    return {
+        "metrics": metric_report_to_dict(metrics),
+        "layer_tp": {"L1": result["s1_tp"], "L2": result["s2_tp"], "L3": result["s3_tp"]},
+        "layer_fp": {"L1": result["s1_fp"], "L2": result["s2_fp"], "L3": result["s3_fp"]},
+    }
+
+
+def export_error_samples(v_data: dict[str, Any], params: dict[str, Any], split: str, out_dir: str, limit: int) -> None:
+    result = simulate_pipeline_vectorized(v_data, params, mask_split(v_data, split))
+    selected_indices = result["selected_indices"]
+    records = v_data["records"]
+
+    fp_path = os.path.join(out_dir, f"{split}_fp_samples.jsonl")
+    fn_path = os.path.join(out_dir, f"{split}_fn_samples.jsonl")
+    fp_written = fn_written = 0
+    with open(fp_path, "w", encoding="utf-8") as fp_f, open(fn_path, "w", encoding="utf-8") as fn_f:
+        for local_i, global_i in enumerate(selected_indices):
+            y = int(result["y_true"][local_i])
+            pred = bool(result["detected"][local_i])
+            record = records[int(global_i)]
+            item = {
+                "split": split,
+                "label": y,
+                "predicted_detected": pred,
+                "source": record.get("source"),
+                "kind": record.get("kind"),
+                "lang": record.get("lang"),
+                "layer_triggers": {
+                    "L1": bool(result["s1_det"][local_i]),
+                    "L2": bool(result["s2_det"][local_i]),
+                    "L3": bool(result["s3_det"][local_i]),
+                },
+                "code": record.get("full_code", ""),
+                "s1_features": {
+                    "hard": bool(record.get("s1_hard", False)),
+                    "word": record.get("s1_max_word", 0),
+                    "spec_string": record.get("s1_spec_string", 0.0),
+                    "spec_identifier": record.get("s1_spec_identifier", 0.0),
+                    "spec_comment": record.get("s1_spec_comment", 0.0),
+                    "spec_error": record.get("s1_spec_error", 0.0),
+                    "non_ascii": record.get("s1_non_ascii", 0.0),
+                },
+                "adv_features": record.get("adv_features", [])[:5],
+                "sem_features": record.get("sem_features", [])[:5],
+            }
+            if y == 0 and pred and fp_written < limit:
+                fp_f.write(json.dumps(item, cls=NumpyEncoder) + "\n")
+                fp_written += 1
+            elif y == 1 and not pred and fn_written < limit:
+                fn_f.write(json.dumps(item, cls=NumpyEncoder) + "\n")
+                fn_written += 1
+
+
+def main() -> None:
+    args = build_arg_parser().parse_args()
+    set_seed(args.seed)
+    torch.set_float32_matmul_precision("high")
+
+    all_pairs = load_pairs(args)
+    if not all_pairs:
+        raise RuntimeError("No valid dataset pairs found.")
+
+    num_pairs_needed = max(1, args.num_samples // 2)
+    selected_pairs = balanced_select_pairs(all_pairs, num_pairs_needed, args.seed)
+    print(f"[-] Selected {len(selected_pairs)} pairs ({len(selected_pairs) * 2} samples).")
+
+    splits = split_pairs(selected_pairs, args.train_ratio, args.val_ratio, args.test_ratio, args.seed)
+    print(
+        f"[-] Split pairs: train={len(splits['train'])}, val={len(splits['val'])}, test={len(splits['test'])}"
+    )
+
+    model, tokenizer, device = load_model_and_tokenizer(args)
+    guardrails = build_guardrails(args, model, tokenizer, device)
+
+    records = extract_split_records(splits, guardrails, args)
+    v_data = prepare_vector_data(records)
+
+    candidates = generate_param_candidates(args.max_grid_trials, args.seed)
+    best = select_best_params(v_data, candidates, args)
+    best_params = best["params"]
+
+    test = simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "test"))
+    train = simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "train"))
+    val = simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "val"))
+
+    run_name = "_".join(args.attack_type)
+    out_dir = os.path.join(args.out_dir, run_name)
+    ensure_dirs(out_dir)
+
+    summary = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "model": args.model_id,
+        "attack_type": args.attack_type,
+        "num_pairs": len(selected_pairs),
+        "max_fpr": args.max_fpr,
+        "beta": args.beta,
+        "optimal_params": best_params,
+        "train": summarize_counts(train),
+        "val": summarize_counts(val),
+        "test": summarize_counts(test),
+    }
+
+    with open(os.path.join(out_dir, "optimal_params.json"), "w", encoding="utf-8") as f:
+        json.dump(best_params, f, indent=2, cls=NumpyEncoder)
+    with open(os.path.join(out_dir, "metrics_summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, cls=NumpyEncoder)
+
+    export_error_samples(v_data, best_params, "train", out_dir, args.debug_limit)
+    export_error_samples(v_data, best_params, "val", out_dir, args.debug_limit)
+    export_error_samples(v_data, best_params, "test", out_dir, args.debug_limit)
+
+    print("\n[+] Best params:")
+    print(json.dumps(best_params, indent=2))
+    print("\n[+] Test metrics:")
+    print(json.dumps(summary["test"], indent=2))
+    print(f"\n[+] Wrote results to: {out_dir}")
+
 
 if __name__ == "__main__":
     main()

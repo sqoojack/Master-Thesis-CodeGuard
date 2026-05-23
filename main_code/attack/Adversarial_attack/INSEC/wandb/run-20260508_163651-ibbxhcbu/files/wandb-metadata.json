@@ -1,0 +1,57 @@
+{
+  "os":  "Linux-6.8.0-110-generic-x86_64-with-glibc2.35",
+  "python":  "CPython 3.12.12",
+  "startedAt":  "2026-05-08T08:36:51.742695Z",
+  "args":  [
+    "--model_dir",
+    "Qwen/Qwen3.5-4B",
+    "--attack_tokenizer",
+    "Qwen/Qwen3.5-4B",
+    "--output_dir",
+    "results/transfer1_qwen35",
+    "--experiment_name",
+    "transfer1_qwen35"
+  ],
+  "program":  "/home/jack/Thesis_topic/main_code/attack/Adversarial_attack/INSEC/main.py",
+  "codePath":  "main_code/attack/Adversarial_attack/INSEC/main.py",
+  "codePathLocal":  "main.py",
+  "git":  {
+    "remote":  "https://github.com/sqoojack/Master-Thesis-CodeGuard.git",
+    "commit":  "02c6e8694a3adcf212c6c6c47f5fe0d83810177f"
+  },
+  "email":  "jack90213@gmail.com",
+  "root":  "/home/jack/Thesis_topic/main_code/attack/Adversarial_attack/INSEC",
+  "host":  "HSNL",
+  "executable":  "/home/jack/anaconda3/envs/Thesis/bin/python",
+  "cpu_count":  16,
+  "cpu_count_logical":  32,
+  "gpu":  "NVIDIA GeForce RTX 4090",
+  "gpu_count":  2,
+  "disk":  {
+    "/":  {
+      "total":  "3936290357248",
+      "used":  "3009188978688"
+    }
+  },
+  "memory":  {
+    "total":  "134551302144"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 4090",
+      "memoryTotal":  "25757220864",
+      "cudaCores":  16384,
+      "architecture":  "Ada",
+      "uuid":  "GPU-195dc047-c39f-ae87-57ab-7c61b49cdad9"
+    },
+    {
+      "name":  "NVIDIA GeForce RTX 4090",
+      "memoryTotal":  "25757220864",
+      "cudaCores":  16384,
+      "architecture":  "Ada",
+      "uuid":  "GPU-6958e318-1d39-7e14-466d-a4e3b8e6558c"
+    }
+  ],
+  "cudaVersion":  "13.0",
+  "writerId":  "hmtxxuk234z7teputq9o8fkm8udgyrb4"
+}
