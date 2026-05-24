@@ -117,10 +117,19 @@ def is_c_cpp_code(code: str) -> bool:
     return any(kw in code for kw in c_keywords)
 
 def check_syntax(code: str) -> Tuple[bool, Optional[str]]:
-    if is_c_cpp_code(code):
-        # Bypass Python compiler checks for C/C++ datasets
-        return True, None
+    # 1. 定義各語言特徵
+    has_java = any(kw in code for kw in ["import java.", "System.out.", "public class ", "throws Exception"])
+    has_c_cpp = any(kw in code for kw in ["#include", "#ifdef", "void ", "struct ", "int main", "->", "/*", "*/", "class ", "std::", "public:"])
+    has_py_contamination = any(kw in code for kw in ["def ", "import flask", "@app.route", "Flask(__name__)"])
+    
+    # 2. 跨語言污染攔截
+    if has_java or has_c_cpp:
+        lang = "Java" if has_java else "C/C++"
+        if has_py_contamination:
+            return False, f"Language contamination: Python wrapper found around {lang} code."
+        return True, None # 編譯型語言跳過 exec 檢查
         
+    # 3. 純 Python 語法檢查
     try:
         compile(code, '<string>', 'exec')
         return True, None
@@ -129,10 +138,18 @@ def check_syntax(code: str) -> Tuple[bool, Optional[str]]:
 
 def check_semantics(code: str) -> Tuple[bool, str]:
     """Execute code in a mock sandbox to ensure semantic preservation."""
-    if is_c_cpp_code(code):
-        # Bypass Python exec evaluation for C/C++ datasets
-        return True, "Execution OK (C Code Sandbox Bypass)"
+    # 保持與 check_syntax 相同的特徵定義
+    has_java = any(kw in code for kw in ["import java.", "System.out.", "public class ", "throws Exception"])
+    has_c_cpp = any(kw in code for kw in ["#include", "#ifdef", "void ", "struct ", "int main", "->", "/*", "*/", "class ", "std::", "public:"])
+    has_py_contamination = any(kw in code for kw in ["def ", "import flask", "@app.route", "Flask(__name__)"])
+    
+    if has_java or has_c_cpp:
+        lang = "Java" if has_java else "C/C++"
+        if has_py_contamination:
+            return False, f"Semantic error: Mixed language contamination with {lang}."
+        return True, f"Execution OK ({lang} Code Sandbox Bypass)"
         
+    # 以下保持原本的 Python 沙盒 exec 邏輯...
     env = """
 class MockRequest:
     def __init__(self):
@@ -144,7 +161,6 @@ request = MockRequest()
 def render_template_string(t): return str(t)
 import os
 """
-    # Filter out flask app definitions to prevent server startup during exec
     code_lines = [
         line for line in code.split('\n') 
         if not line.strip().startswith(('from flask', 'import flask', 'app = Flask', '@app.', 'if __name__', 'app.run'))

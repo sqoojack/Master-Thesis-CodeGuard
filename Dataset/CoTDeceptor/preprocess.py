@@ -3,17 +3,25 @@ import os
 import json
 import argparse
 
+def detect_language(code: str) -> str:
+    """簡易語言偵測邏輯"""
+    if any(kw in code for kw in ["import java.", "System.out.", "public class "]):
+        return "Java"
+    if any(kw in code for kw in ["#include", "#ifdef", "void ", "struct ", "int main", "->"]):
+        return "C"
+    if any(kw in code for kw in ["def ", "import flask", "class "]):
+        return "Python"
+    return "Unknown"
+
 def build_cotdeceptor_dataset(input_file: str, output_file: str, dataset_source: str):
     dataset = []
     processed_count = 0
     error_count = 0
 
-    # Check if input file exists
     if not os.path.exists(input_file):
         print(f"Error: Input file '{input_file}' not found.")
         return
 
-    # Read and parse the original JSONL file
     with open(input_file, 'r', encoding='utf-8') as f_in:
         for line_idx, line in enumerate(f_in):
             line = line.strip()
@@ -22,25 +30,26 @@ def build_cotdeceptor_dataset(input_file: str, output_file: str, dataset_source:
             
             try:
                 data = json.loads(line)
-                
-                # Extract required fields
                 orig_id = data.get("id", "")
                 orig_code = data.get("orig_code", "")
                 adv_code = data.get("adv_code", "")
 
                 if not orig_code or not adv_code:
-                    print(f"Warning: Missing code fields at line {line_idx + 1}")
                     error_count += 1
                     continue
 
-                # Parse CWE IDs from the id field
+                # Parse CWE
                 cwe_parts = [part for part in orig_id.split("_") if part.startswith("CWE-")]
                 cwe_id = "_".join(cwe_parts) if cwe_parts else ""
+
+                # 增加 language 判斷
+                detected_lang = detect_language(orig_code)
 
                 # Construct new data entry
                 new_entry = {
                     "dataset_source": dataset_source,
                     "CWE_id": cwe_id,
+                    "language": detected_lang, # 新增語言標籤
                     "code": orig_code,
                     "adv_code": adv_code
                 }
@@ -48,18 +57,14 @@ def build_cotdeceptor_dataset(input_file: str, output_file: str, dataset_source:
                 processed_count += 1
                 
             except json.JSONDecodeError as e:
-                print(f"Error decoding JSON at line {line_idx + 1}: {e}")
                 error_count += 1
 
-    # Ensure output directory exists
     os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
     
-    # Write to new JSONL file
     with open(output_file, 'w', encoding='utf-8') as f_out:
         for entry in dataset:
             f_out.write(json.dumps(entry, ensure_ascii=False) + '\n')
     
-    # Print execution summary
     print("-" * 30)
     print("Processing completed.")
     print(f"Successfully processed entries: {processed_count}")

@@ -19,17 +19,31 @@ def generate_llm_strategy(model_name: str, feedback: str) -> Strategy:
     strat_name = f"dyn_llm_{''.join(random.choices(string.ascii_lowercase, k=4))}"
     
     def apply_dynamic(code: str) -> str:
+        # 動態判定當前代碼的語系
+        if any(kw in code for kw in ["import java.", "System.out.", "public class ", "throws Exception"]):
+            lang_str = "Java"
+        elif any(kw in code for kw in ["#include", "#ifdef", "void ", "struct ", "int main", "->", "/*", "*/", "class ", "std::", "public:"]):
+            lang_str = "C/C++"
+        else:
+            lang_str = "Python"
+        
         prompt = (
-            f"Modify this C code to evade security detection. "
+            f"Modify this {lang_str} code to evade security detection. "
             f"Feedback to address: {feedback}. "
-            f"Return ONLY raw valid C code without markdown blocks or explanations.\n\nCode:\n{code}"
+            f"Do not mix languages or add wrappers/templates of another language (e.g., do not wrap {lang_str} inside Python Flask). "
+            f"Return ONLY raw valid {lang_str} code without markdown blocks or explanations.\n\nCode:\n{code}"
         )
         try:
             res = httpx.post("http://127.0.0.1:11434/api/generate", json={
                 "model": model_name, "prompt": prompt, "stream": False
             }, timeout=30.0)
             new_code = res.json().get("response", "")
-            new_code = new_code.replace("```c", "").replace("```C", "").replace("```", "").strip()
+            # 清理常見的 Markdown 包裝
+            new_code = new_code.replace("```c++", "").replace("```C++", "")
+            new_code = new_code.replace("```c", "").replace("```C", "")
+            new_code = new_code.replace("```java", "").replace("```Java", "")
+            new_code = new_code.replace("```python", "").replace("```Python", "")
+            new_code = new_code.replace("```", "").strip()
             return new_code if new_code else code
         except Exception as e:
             print(f"[Strategy] Dynamic LLM failed: {e}")

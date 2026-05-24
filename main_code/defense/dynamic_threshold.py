@@ -68,14 +68,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("-n", "--num_samples", type=int, default=300, help="Total samples. Half benign, half adversarial.")
     parser.add_argument("-bs", "--batch_size", type=int, default=8)
     parser.add_argument("--batch_token_budget", type=int, default=2048)
-    parser.add_argument("--max_fpr", type=float, default=0.10)
     parser.add_argument("--beta", type=float, default=1.5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--default_lang", type=str, default="c")
     parser.add_argument("--train_ratio", type=float, default=0.60)
     parser.add_argument("--val_ratio", type=float, default=0.20)
     parser.add_argument("--test_ratio", type=float, default=0.20)
-    parser.add_argument("--max_grid_trials", type=int, default=3000)
+    parser.add_argument("--max_grid_trials", type=int, default=100000)
     parser.add_argument("--out_dir", type=str, default="result/debug_logs", help="Root output directory. Results are written to {out_dir}/{attack_type}.")
     parser.add_argument("--debug_limit", type=int, default=20)
     parser.add_argument("--no_4bit", action="store_true", help="Disable 4-bit loading. Useful when bitsandbytes is unavailable.")
@@ -83,11 +82,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5, max_allowed_fpr: float = 0.10) -> float:
+def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5) -> float:
     fpr = fp / (fp + tn) if (tn + fp) > 0 else 0.0
-    if fpr > max_allowed_fpr:
-        return -1.0
-    return f_beta_score(tp, fp, fn, beta=beta)
+    f_beta = f_beta_score(tp, fp, fn, beta=beta)
+    
+    # 讓 (1 - fpr) 成為權重。FPR 越低，保留的 F-beta 分數比例越高
+    # 例如 FPR = 5%，分數打 95 折；FPR = 20%，分數打 8 折
+    score = f_beta * (1.0 - fpr)
+    
+    return float(score)
 
 
 def load_model_and_tokenizer(args: argparse.Namespace):
@@ -446,18 +449,18 @@ def default_param_candidates() -> list[dict[str, Any]]:
 
 def generate_param_candidates(max_trials: int, seed: int) -> list[dict[str, Any]]:
     spaces = {
-        "th_adv": [8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0],
-        "th_str": [8.0, 10.0, 12.0, 15.0, 18.0, 20.0, 22.0],
-        "th_l3": [0.02, 0.05, 0.08, 0.12, 0.16, 0.20, 0.26, 0.32],
-        "t_l3": [0.01, 0.05, 0.10, 0.20, 0.30],
-        "l3_min_surprise": [0.05, 0.10, 0.15, 0.20, 0.30],
-        "l3_z_trigger": [3.0, 3.5, 4.0, 4.5],
-        "th_s1_w": [50, 100, 150, 200],
-        "th_s1_str": [0.10, 0.18, 0.22, 0.25, 0.35, 0.45],
-        "th_s1_identifier": [0.10, 0.20, 0.28, 0.35, 0.45],
-        "th_s1_comment": [0.25, 0.35, 0.45, 0.55],
-        "th_s1_error": [0.06, 0.08, 0.12, 0.18, 0.25],
-        "th_s1_a": [0.001, 0.01, 0.05, 0.15, 0.40],
+        "th_adv": np.arange(12.0, 26.1, 2.0),
+        "th_str": np.arange(12.0, 24.1, 2.0),
+        "th_l3": np.arange(0.15, 0.56, 0.05),
+        "t_l3": np.arange(0.05, 0.36, 0.05),
+        "l3_min_surprise": np.arange(0.15, 0.51, 0.05),
+        "l3_z_trigger": np.arange(2.0, 4.6, 0.5),
+        "th_s1_w": np.arange(50, 201, 50),
+        "th_s1_str": np.arange(0.20, 0.46, 0.05),
+        "th_s1_identifier": np.arange(0.10, 0.36, 0.05),
+        "th_s1_comment": np.arange(0.30, 0.56, 0.05),
+        "th_s1_error": np.arange(0.01, 0.16, 0.03),
+        "th_s1_a": [0.0005, 0.001, 0.005, 0.01, 0.05],
     }
 
     keys = list(spaces.keys())
@@ -485,7 +488,7 @@ def select_best_params(v_data: dict[str, Any], candidates: list[dict[str, Any]],
 
     for params in tqdm(candidates, desc="Search thresholds", ncols=100):
         train = simulate_pipeline_vectorized(v_data, params, train_mask)
-        train_score = objective_function(train["tp"], train["fp"], train["fn"], train["tn"], args.beta, args.max_fpr)
+        train_score = objective_function(train["tp"], train["fp"], train["fn"], train["tn"], args.beta)
         train_metrics = compute_metrics(train["tp"], train["fp"], train["fn"], train["tn"])
 
         fallback_key = (train_score, train_metrics.recall, -train_metrics.fpr, train_metrics.precision)
@@ -496,7 +499,7 @@ def select_best_params(v_data: dict[str, Any], candidates: list[dict[str, Any]],
             continue
 
         val = simulate_pipeline_vectorized(v_data, params, val_mask)
-        val_score = objective_function(val["tp"], val["fp"], val["fn"], val["tn"], args.beta, args.max_fpr)
+        val_score = objective_function(val["tp"], val["fp"], val["fn"], val["tn"], args.beta)
         val_metrics = compute_metrics(val["tp"], val["fp"], val["fn"], val["tn"])
         train_key = (val_score, train_score, val_metrics.recall, -val_metrics.fpr, val_metrics.precision)
         if best is None or train_key > best["key"]:
@@ -618,7 +621,6 @@ def main() -> None:
         "model": args.model_id,
         "attack_type": args.attack_type,
         "num_pairs": len(selected_pairs),
-        "max_fpr": args.max_fpr,
         "beta": args.beta,
         "optimal_params": best_params,
         "train": summarize_counts(train),
@@ -636,9 +638,9 @@ def main() -> None:
     export_error_samples(v_data, best_params, "test", out_dir, args.debug_limit)
 
     print("\n[+] Best params:")
-    print(json.dumps(best_params, indent=2))
+    print(json.dumps(best_params, indent=2, cls=NumpyEncoder))
     print("\n[+] Test metrics:")
-    print(json.dumps(summary["test"], indent=2))
+    print(json.dumps(summary["test"], indent=2, cls=NumpyEncoder))
     print(f"\n[+] Wrote results to: {out_dir}")
 
 

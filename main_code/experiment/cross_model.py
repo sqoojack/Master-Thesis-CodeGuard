@@ -7,8 +7,10 @@ Test models:
 
 Example:
 python main_code/experiment/cross_model.py --attack_type Tranfer_2_codegen --gpu_id 0
-python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 1
-python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id 1
+python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 1 --run_paras --threshold_beta 1.5
+python main_code/experiment/cross_model.py --attack_type CoTDeceptor --gpu_id 1 
+python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id 1 --run_paras
+python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 0 --run_paras
 """
 
 import os
@@ -71,7 +73,6 @@ def build_dynamic_threshold_command(
     num_samples: int,
     batch_size: int,
     batch_token_budget: int,
-    max_fpr: float,
     beta: float,
     default_lang: str,
 ) -> list[str]:
@@ -89,8 +90,6 @@ def build_dynamic_threshold_command(
         str(batch_size),
         "--batch_token_budget",
         str(batch_token_budget),
-        "--max_fpr",
-        str(max_fpr),
         "--beta",
         str(beta),
         "--default_lang",
@@ -115,12 +114,15 @@ def build_subprocess_env(gpu_id: str) -> dict:
 
 
 def ensure_optimized_params(args: argparse.Namespace, param_file: str) -> None:
-    """Generate optimal_params.json automatically when it does not exist."""
-    if os.path.exists(param_file):
+    """Generate optimal_params.json automatically when it does not exist or when forced."""
+    if os.path.exists(param_file) and not args.run_paras:
         return
 
-    print(f"[!] Parameter file not found at {param_file}")
-    print(f"[*] Running dynamic_threshold.py for attack_type='{args.attack_type}' first...")
+    if args.run_paras:
+        print(f"[*] Force running dynamic_threshold.py for attack_type='{args.attack_type}'...")
+    else:
+        print(f"[!] Parameter file not found at {param_file}")
+        print(f"[*] Running dynamic_threshold.py for attack_type='{args.attack_type}' first...")
 
     env = build_subprocess_env(args.gpu_id)
     cmd = build_dynamic_threshold_command(
@@ -129,7 +131,6 @@ def ensure_optimized_params(args: argparse.Namespace, param_file: str) -> None:
         num_samples=args.threshold_num_samples,
         batch_size=args.batch_size,
         batch_token_budget=args.batch_token_budget,
-        max_fpr=args.threshold_max_fpr,
         beta=args.threshold_beta,
         default_lang=args.default_lang,
     )
@@ -192,12 +193,6 @@ def run_cross_model_eval() -> None:
         help="Number of samples for dynamic_threshold.py when optimal_params.json is missing.",
     )
     parser.add_argument(
-        "--threshold_max_fpr",
-        type=float,
-        default=0.10,
-        help="Max FPR passed to dynamic_threshold.py when optimal_params.json is missing.",
-    )
-    parser.add_argument(
         "--threshold_beta",
         type=float,
         default=1.5,
@@ -208,6 +203,16 @@ def run_cross_model_eval() -> None:
         type=str,
         default="c",
         help="Default language passed to dynamic_threshold.py when optimal_params.json is missing.",
+    )
+    parser.add_argument(
+        "--run_paras",
+        action="store_true",
+        help="Force running dynamic_threshold.py even if optimal_params.json exists.",
+    )
+    parser.add_argument(
+        "--only_tune",
+        action="store_true",
+        help="Only run dynamic_threshold.py and skip the model evaluation loop.",
     )
     args = parser.parse_args()
 
@@ -238,6 +243,11 @@ def run_cross_model_eval() -> None:
         ensure_optimized_params(args, param_file)
     except (RuntimeError, FileNotFoundError) as exc:
         print(f"[!] Error: {exc}")
+        return
+
+    # Check if user only wants to tune thresholds and skip evaluation
+    if args.only_tune:
+        print("[+] Parameter tuning completed. Skipping model evaluation loop as requested.")
         return
 
     print("[*] Initializing Cross-Model Evaluation...")

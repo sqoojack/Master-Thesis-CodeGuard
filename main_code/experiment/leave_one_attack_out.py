@@ -72,7 +72,6 @@ def build_dynamic_threshold_command(
     num_samples: int,
     batch_size: int,
     batch_token_budget: int,
-    max_fpr: float,
     beta: float,
     default_lang: str,
 ) -> list[str]:
@@ -90,8 +89,6 @@ def build_dynamic_threshold_command(
         str(batch_size),
         "--batch_token_budget",
         str(batch_token_budget),
-        "--max_fpr",
-        str(max_fpr),
         "--beta",
         str(beta),
         "--default_lang",
@@ -130,7 +127,6 @@ def ensure_optimized_params(args: argparse.Namespace, tune_attack_type: str, par
         num_samples=args.threshold_num_samples,
         batch_size=args.batch_size,
         batch_token_budget=args.batch_token_budget,
-        max_fpr=args.threshold_max_fpr,
         beta=args.threshold_beta,
         default_lang=args.default_lang,
     )
@@ -190,12 +186,6 @@ def run_loao_eval() -> None:
         type=int,
         default=300,
         help="Number of samples for dynamic_threshold.py when optimal_params.json is missing.",
-    )
-    parser.add_argument(
-        "--threshold_max_fpr",
-        type=float,
-        default=0.10,
-        help="Max FPR passed to dynamic_threshold.py when optimal_params.json is missing.",
     )
     parser.add_argument(
         "--threshold_beta",
@@ -316,18 +306,18 @@ def run_loao_eval() -> None:
             print(f"[!] Evaluation failed for {model_id} with error: {e}. Moving to next model...")
             continue
         
-        print("\n[*] Cleaning up temporary LOAO directories and files...")
-        cleanup_paths = [
-            train_dir,
-            test_dir,
-            os.path.dirname(tune_param_file),
-            test_param_dir,
-            os.path.join("result", "sanitized_data", f"test_{args.leave_out_attack}"),
-        ]
-        for path in cleanup_paths:
-            if os.path.exists(path):
-                shutil.rmtree(path)
-        print("[+] Cleanup finished.")
+    print("\n[*] Cleaning up temporary LOAO directories and files...")
+    cleanup_paths = [
+        train_dir,
+        test_dir,
+        os.path.dirname(tune_param_file),
+        test_param_dir,
+        os.path.join("result", "sanitized_data", f"test_{args.leave_out_attack}"),
+    ]
+    for path in cleanup_paths:
+        if os.path.exists(path):
+            shutil.rmtree(path)
+    print("[+] Cleanup finished.")
 
 
 if __name__ == "__main__":

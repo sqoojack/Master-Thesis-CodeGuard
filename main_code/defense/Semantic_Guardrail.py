@@ -2,11 +2,9 @@ import math
 import re
 from collections import defaultdict
 from typing import Any
-
 import numpy as np
 import torch
 from tree_sitter import Query, QueryCursor
-
 from guardrail_common import (
     COMMON_CODE_PREFIXES,
     COMMON_CODE_SUFFIXES,
@@ -16,7 +14,6 @@ from guardrail_common import (
     semantic_dynamic_threshold,
 )
 
-
 class SemanticGuardrail:
     def __init__(self, model, tokenizer, device, parser, language, args):
         self.model = model
@@ -25,19 +22,16 @@ class SemanticGuardrail:
         self.parser = parser
         self.language = language
         self.lang_name = getattr(args, "lang", "c").lower()
-
         self.base_influence_th = getattr(args, "l3_base_influence", 0.025)
         self.surprise_tolerance = getattr(args, "l3_surprise_tolerance", 0.10)
         self.min_surprise = getattr(args, "l3_min_surprise", 0.15)
         self.z_trigger_th = getattr(args, "l3_z_trigger", 3.5)
-
         self.max_ctx_threshold = getattr(args, "l3_max_ctx_threshold", 1.5)
         self.top_k_candidates = getattr(args, "l3_top_k_candidates", 30)
         self.prefix_window = getattr(args, "l3_prefix_window", 300)
         self.suffix_window = getattr(args, "l3_suffix_window", 300)
         self.batch_size = getattr(args, "batch_size", 8)
         self.batch_token_budget = getattr(args, "batch_token_budget", 2048)
-
         self.whitelist = {
             "int", "char", "void", "float", "double", "long", "short", "unsigned", "signed",
             "struct", "union", "enum", "static", "const", "volatile", "register", "auto",
@@ -49,7 +43,6 @@ class SemanticGuardrail:
             "recv", "send", "read", "write", "open", "close", "self", "this", "user", "password",
             "request", "response", "error", "status", "result", "source", "target", "device", "driver",
         }
-
         self.noise_prefixes = COMMON_CODE_PREFIXES
         self.noise_suffixes = COMMON_CODE_SUFFIXES
 
@@ -85,18 +78,15 @@ class SemanticGuardrail:
         results = [np.array([], dtype=np.float32) for _ in texts]
         buckets = defaultdict(list)
         max_length = self._max_length()
-
         for idx, text in enumerate(texts):
             encoded = self.tokenizer(text, truncation=True, max_length=max_length, add_special_tokens=True)
             ids = encoded.get("input_ids", [])
             if len(ids) <= 1:
                 continue
             buckets[self._length_bucket(len(ids))].append((idx, ids))
-
         pad_id = self.tokenizer.pad_token_id
         if pad_id is None:
             pad_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else 0
-
         for bucket in sorted(buckets):
             items = buckets[bucket]
             item_pos = 0
@@ -113,23 +103,19 @@ class SemanticGuardrail:
                     chunk.append(candidate)
                     max_len = proposed_max_len
                     item_pos += 1
-
                 if not chunk:
                     chunk = [items[item_pos]]
                     max_len = len(chunk[0][1])
                     item_pos += 1
-
                 input_ids = torch.full((len(chunk), max_len), pad_id, dtype=torch.long, device=self.device)
                 attention_mask = torch.zeros((len(chunk), max_len), dtype=torch.long, device=self.device)
                 for row, (_, ids) in enumerate(chunk):
                     ids_tensor = torch.tensor(ids, dtype=torch.long, device=self.device)
                     input_ids[row, : len(ids)] = ids_tensor
                     attention_mask[row, : len(ids)] = 1
-
                 batch_losses, batch_masks = self._losses_from_batch(input_ids, attention_mask)
                 for row, (idx, _) in enumerate(chunk):
                     results[idx] = batch_losses[row][batch_masks[row]]
-
         return results
 
     def get_mean_losses(self, texts):
@@ -154,7 +140,6 @@ class SemanticGuardrail:
     def get_token_type(self, code_bytes, node, text):
         if text.isupper() or is_likely_project_macro(text):
             return "MACRO"
-
         end_byte = node.end_byte
         next_bytes = code_bytes[end_byte : end_byte + 10].strip()
         if next_bytes.startswith(b"("):
@@ -162,24 +147,17 @@ class SemanticGuardrail:
         return "NORMAL"
 
     def calculate_dynamic_factor(self, token_type, is_noisy, node_len, local_z_score=0.0):
-        """Higher factor means a stricter semantic threshold."""
         factor = 1.0
-
         if token_type in ("STRING", "COMMENT"):
             factor += math.log1p(max(0, node_len)) / 10.0
         elif token_type == "FUNC":
             factor *= 1.3
         elif token_type == "MACRO":
             factor *= 1.8
-
         if is_noisy:
             factor *= 1.6
-
-        # If a candidate is only a relative outlier inside a very noisy local set,
-        # slightly relax the z-score contribution but do not make the threshold too small.
         if local_z_score > 0:
             factor *= max(0.75, 1.0 - (local_z_score * 0.05))
-
         return float(max(0.1, factor))
 
     def get_captures_from_query(self, query, root_node):
@@ -198,7 +176,6 @@ class SemanticGuardrail:
             char_to_byte[i] = byte_pos
             byte_pos += len(ch.encode("utf8"))
         char_to_byte[len(text)] = byte_pos
-
         byte_offsets = []
         for start, end in offsets:
             start = max(0, min(int(start), len(text)))
@@ -209,7 +186,6 @@ class SemanticGuardrail:
     def _get_top_candidates(self, code):
         if not code:
             return b"", []
-
         code_bytes = bytes(code, "utf8")
         max_len = self._max_length()
         inputs = self.tokenizer(
@@ -222,7 +198,6 @@ class SemanticGuardrail:
         input_ids = inputs["input_ids"].to(self.device)
         offsets = self._offsets_to_byte_offsets(code, inputs["offset_mapping"][0].cpu().numpy())
         ctx_losses = self.get_token_losses(input_ids)
-
         try:
             tree = self.parser.parse(code_bytes)
             comment_node = "(line_comment) @comment (block_comment) @comment" if self.lang_name == "java" else "(comment) @comment"
@@ -232,7 +207,6 @@ class SemanticGuardrail:
             captures = self.get_captures_from_query(query, tree.root_node)
         except Exception:
             return code_bytes, []
-
         var_ranges = []
         for node, type_name in captures:
             text = node.text.decode("utf8", errors="ignore")
@@ -246,7 +220,6 @@ class SemanticGuardrail:
                     continue
                 is_noisy = False
                 token_type = type_name.upper()
-
             var_ranges.append(
                 {
                     "start": node.start_byte,
@@ -258,12 +231,10 @@ class SemanticGuardrail:
                     "len": node.end_byte - node.start_byte,
                 }
             )
-
         last_byte_covered = offsets[-1][1] if len(offsets) > 0 else 0
         valid_var_ranges = [v for v in var_ranges if v["end"] <= last_byte_covered]
         var_ctx_map = defaultdict(list)
         var_meta_map = {}
-
         for i, loss in enumerate(ctx_losses):
             token_idx = i + 1
             if token_idx >= len(offsets):
@@ -275,16 +246,13 @@ class SemanticGuardrail:
                     var_ctx_map[node_key].append(loss)
                     var_meta_map[node_key] = v_info
                     break
-
         potential_keys = []
         for node_key, losses in var_ctx_map.items():
             max_ctx = np.max(losses)
             if max_ctx > self.max_ctx_threshold:
                 potential_keys.append((node_key, max_ctx))
-
         potential_keys.sort(key=lambda x: x[1], reverse=True)
         potential_keys = potential_keys[: self.top_k_candidates]
-
         prior_losses = self.get_mean_losses([node_key[2] for node_key, _ in potential_keys])
         candidates = []
         for (node_key, max_ctx), prior in zip(potential_keys, prior_losses):
@@ -297,52 +265,72 @@ class SemanticGuardrail:
                     "meta": var_meta_map[node_key],
                 }
             )
-
         candidates.sort(key=lambda x: x["surprise_score"], reverse=True)
         return code_bytes, candidates
 
     def _calculate_candidate_stats(self, code_bytes, top_candidates):
         if not top_candidates:
             return []
-
         stats: list[dict[str, Any] | None] = [None] * len(top_candidates)
         eval_texts = []
         eval_jobs = []
-
         for idx, cand in enumerate(top_candidates):
             var = cand["var"]
             meta = cand["meta"]
             start_byte, end_byte, node_type = meta["start"], meta["end"], meta["node_type"]
-
             prefix = code_bytes[:start_byte].decode("utf8", errors="ignore")
             local_prefix = prefix[-self.prefix_window :] if len(prefix) > self.prefix_window else prefix
             suffix = code_bytes[end_byte:].decode("utf8", errors="ignore")
             eval_suffix = suffix[: self.suffix_window]
-
             if len(eval_suffix) < 10:
                 stats[idx] = {"cand": cand, "influence": 0.0, "z_score": 0.0}
                 continue
-
             text_orig = local_prefix + var + eval_suffix
+
+            # ----------------- 學術嚴謹性優化：型態與語法感知基準替換 -----------------
+            # 依據節點型態與細粒度語法角色，選取符合分佈高頻且良性的基準，阻斷 OOD Confounder
             if node_type == "comment":
-                neutral_repls = ["//", "/* NA */"] if var.startswith("//") else ["/* */", "/* NA */"]
+                if self.lang_name == "python":
+                    neutral_repls = ['"""Docstring."""', '# Neutral comment']
+                else:
+                    neutral_repls = ["// Neutral comment", "/* Neutral comment */"] if var.startswith("//") else ["/* Neutral comment */"]
             elif node_type == "string":
-                neutral_repls = ['""', '"none"']
+                # 避免長度直接歸零導致語法斷層，使用該語言高頻且語意中立的字串
+                if self.lang_name == "python":
+                    neutral_repls = ['"value"', '"data"']
+                else:
+                    neutral_repls = ['"string"', '"text"']
             else:
-                neutral_repls = ["VAR", "TMP", "IDX"]
+                token_type = meta.get("type", "NORMAL")
+                if token_type == "FUNC":
+                    # 替換為符合語法預期的常見良性函數識別碼
+                    if self.lang_name == "python":
+                        neutral_repls = ["helper_func", "process_data", "calculate"]
+                    else:
+                        neutral_repls = ["handle_request", "get_instance", "do_work"]
+                elif token_type == "MACRO":
+                    neutral_repls = ["BUFFER_SIZE", "MAX_MIN", "SUCCESS"]
+                else:
+                    # NORMAL 識別碼：從高機率良性分佈或白名單中選取
+                    if self.lang_name == "python":
+                        neutral_repls = ["data", "value", "result"]
+                    elif self.lang_name == "solidity":
+                        neutral_repls = ["owner", "amount", "sender"]
+                    else:
+                        neutral_repls = ["buf", "count", "status"]
+            # ------------------------------------------------------------------------
 
             start = len(eval_texts)
             eval_texts.append(text_orig)
             eval_texts.extend(local_prefix + r + eval_suffix for r in neutral_repls)
             eval_jobs.append((idx, start, len(neutral_repls)))
-
+        
         mean_losses = self.get_mean_losses(eval_texts) if eval_texts else []
         for idx, start, repl_count in eval_jobs:
             loss_orig = mean_losses[start]
             repl_losses = mean_losses[start + 1 : start + 1 + repl_count]
             influence = float(loss_orig - np.mean(repl_losses)) if repl_losses else 0.0
             stats[idx] = {"cand": top_candidates[idx], "influence": influence}
-
         compact_stats = [s for s in stats if s is not None]
         influences = [s["influence"] for s in compact_stats]
         local_mean = np.mean(influences) if influences else 0.0
@@ -351,7 +339,6 @@ class SemanticGuardrail:
             local_std = 1.0
         for s in compact_stats:
             s["z_score"] = float((s["influence"] - local_mean) / local_std)
-
         return compact_stats
 
     def extract_semantic_features(self, code):
@@ -386,7 +373,6 @@ class SemanticGuardrail:
         if not top_candidates:
             return False, code, []
         candidate_stats = self._calculate_candidate_stats(code_bytes, top_candidates)
-
         toxic_nodes, is_attack, debug_info = [], False, []
         for stats in candidate_stats:
             cand = stats["cand"]
@@ -394,7 +380,6 @@ class SemanticGuardrail:
             z_score = float(stats["z_score"])
             surprise, meta = float(cand["surprise_score"]), cand["meta"]
             factor = self.calculate_dynamic_factor(meta["type"], meta["is_noisy"], meta["len"], z_score)
-
             feature = {
                 "influence": influence,
                 "surprise": surprise,
@@ -408,11 +393,9 @@ class SemanticGuardrail:
                 self.min_surprise,
                 self.z_trigger_th,
             )
-
             if triggered:
                 toxic_nodes.append(meta)
                 is_attack = True
-
             debug_info.append(
                 {
                     "var": cand["var"][:80].replace("\n", " "),
@@ -427,7 +410,6 @@ class SemanticGuardrail:
                     "triggered": triggered,
                 }
             )
-
         repaired_code = code
         if is_attack:
             toxic_nodes.sort(key=lambda x: x["start"], reverse=True)
@@ -438,7 +420,6 @@ class SemanticGuardrail:
                 elif meta["node_type"] == "comment":
                     del new_code_bytes[meta["start"] : meta["end"]]
                 else:
-                    # Uniformly replace compromised identifiers with syntactically valid temporary variable names
                     new_code_bytes[meta["start"] : meta["end"]] = b"tmp_var"
             repaired_code = new_code_bytes.decode("utf8", errors="ignore")
         return is_attack, repaired_code, debug_info

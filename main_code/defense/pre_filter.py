@@ -8,6 +8,7 @@ from guardrail_common import (
     adjusted_special_ratio,
     get_comment_query,
     get_string_query,
+    is_common_code_identifier,
     is_normal_c_format_string,
     node_kind,
     s1_special_threshold,
@@ -86,24 +87,14 @@ class PreFilter:
         )
 
     def _identifier_anomaly(self, text: str) -> tuple[bool, str | None]:
-        # Important: keep this before the generic length gate.  Short decoy
-        # identifiers such as `_dead_xxx` were previously skipped.
+        if is_common_code_identifier(text):
+            return False, None
         if text.startswith("_dead_"):
             return True, f"Suspicious_Identifier ({text[:20]}...)"
-
         sub_words = re.split(r"_|(?=[A-Z])", text)
         max_sub_len = max((len(w) for w in sub_words if w), default=0)
         if max_sub_len > 25:
             return True, f"Suspicious_Identifier ({text[:20]}...)"
-
-        # A narrow short-random pattern for adaptive decoys.  Keep it conservative
-        # to avoid flagging normal names such as buffer, output, result.
-        common = {
-            "buffer", "output", "result", "length", "packet", "status", "source", "target",
-            "context", "config", "device", "driver", "memory", "module", "return", "thread",
-        }
-        if re.fullmatch(r"_[a-z]{5,10}", text) and text not in common:
-            return True, f"Random_Looking_Identifier ({text[:20]})"
         return False, None
 
     def _check_structural_anomaly(self, text: str, node_type: str, capture_name: str | None = None):
