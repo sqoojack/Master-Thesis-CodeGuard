@@ -1,9 +1,12 @@
-# python main_code/experiment/cross_layer.py --attack_type Merged_all --gpu_id 1
+# python main_code/experiment/cross_layer.py --modes_to_test l1 l2 l3 --run_param --attack_type Merged_all --gpu_id 1 --threshold_beta 1.0
 import os
+import sys
 import json
 import argparse
 import subprocess
 from datetime import datetime
+
+DYNAMIC_THRESHOLD_SCRIPT = "main_code/defense/dynamic_threshold.py"
 
 def run_cross_layer_eval() -> None:
     # --- Argument Parsing ---
@@ -11,28 +14,75 @@ def run_cross_layer_eval() -> None:
     parser.add_argument("--attack_type", type=str, required=True, help="The specific attack type used for parameter lookup")
     parser.add_argument("--gpu_id", type=str, default="0", help="GPU ID to use")
     parser.add_argument("--model_id", type=str, default="Salesforce/codegen-350M-multi", help="Model ID to evaluate")
+    parser.add_argument("--run_param", action="store_true", help="Force running dynamic_threshold.py even if optimal_params.json exists")
+    parser.add_argument("--threshold_model_id", type=str, default="Salesforce/codegen-350M-multi", help="Model used by dynamic_threshold.py")
+    parser.add_argument("--threshold_num_samples", type=int, default=300, help="Number of samples for dynamic_threshold.py")
+    parser.add_argument("--threshold_beta", type=float, default=1.5, help="Beta passed to dynamic_threshold.py")
+    parser.add_argument("--default_lang", type=str, default="c", help="Default language passed to dynamic_threshold.py")
+    parser.add_argument("-bs", "--batch_size", type=int, default=8, help="Batch size for dynamic_threshold.py")
+    parser.add_argument("--batch_token_budget", type=int, default=2048, help="Batch token budget for dynamic_threshold.py")
+    parser.add_argument("--modes_to_test", type=str, nargs="+", default=["l2"], help="List of modes to evaluate in cross-layer execution")
     args = parser.parse_args()
 
-    # Define the path to the optimized parameters
-    param_file = f"result/debug_logs/{args.attack_type}/optimal_params.json"
-    
-    # --- Pre-execution Checks ---
-    if not os.path.exists(param_file):
-        print(f"[!] Error: Parameter file not found at {param_file}")
-        return
-
-    # --- Load Optimized Parameters ---
-    with open(param_file, "r", encoding="utf-8") as f:
-        params = json.load(f)
-
     # --- Execution ---
-    modes_to_test = ["all", "l1", "l2", "l3"]
+    modes_to_test = args.modes_to_test
     print(f"[*] Initializing Cross-Layer Evaluation...")
     print(f"[*] Attack Category: {args.attack_type}")
     print(f"[*] Target Model: {args.model_id}")
     print(f"[*] Using GPU: {args.gpu_id}")
     
     for mode in modes_to_test:
+        # Define the path to the optimized parameters specific to the current mode
+        param_file = f"result/debug_logs/{args.attack_type}/{mode}_optimal_params.json"
+        
+        # --- Pre-execution Checks / Parameter Tuning (Moved Inside Loop) ---
+        if not os.path.exists(param_file) or args.run_param:
+            if args.run_param and os.path.exists(param_file):
+                print(f"[*] Force running dynamic_threshold.py for attack_type='{args.attack_type}' with mode='{mode}'...")
+            else:
+                print(f"[!] Parameter file not found at {param_file}")
+                print(f"[*] Running dynamic_threshold.py for attack_type='{args.attack_type}' with mode='{mode}' first...")
+            
+            # Setup environment for dynamic threshold execution
+            tune_env = os.environ.copy()
+            tune_env["PYTHONUNBUFFERED"] = "1"
+            tune_env["CUDA_VISIBLE_DEVICES"] = args.gpu_id
+            
+            conda_lib_dir = "/home/jack/anaconda3/envs/Thesis/lib"
+            current_ld_path = tune_env.get("LD_LIBRARY_PATH", "")
+            if current_ld_path:
+                tune_env["LD_LIBRARY_PATH"] = f"{conda_lib_dir}:{current_ld_path}"
+            else:
+                tune_env["LD_LIBRARY_PATH"] = conda_lib_dir
+
+            tune_cmd = [
+                sys.executable,
+                DYNAMIC_THRESHOLD_SCRIPT,
+                "--attack_type", args.attack_type,
+                "--model_id", args.threshold_model_id,
+                "-n", str(args.threshold_num_samples),
+                "-bs", str(args.batch_size),
+                "--batch_token_budget", str(args.batch_token_budget),
+                "--beta", str(args.threshold_beta),
+                "--default_lang", args.default_lang,
+                "--mode", mode,
+            ]
+            
+            try:
+                subprocess.run(tune_cmd, check=True, env=tune_env)
+                print(f"[+] Generated parameter file: {param_file}")
+            except subprocess.CalledProcessError as e:
+                print(f"[!] Error: dynamic_threshold.py failed for mode {mode} with error: {e}")
+                return
+
+            if not os.path.exists(param_file):
+                print(f"[!] Error: Parameter file still missing after tuning: {param_file}")
+                return
+
+        # --- Load Optimized Parameters ---
+        with open(param_file, "r", encoding="utf-8") as f:
+            params = json.load(f)
+
         current_env = os.environ.copy()
         current_env["PYTHONUNBUFFERED"] = "1"
         current_env["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -101,6 +151,7 @@ def run_cross_layer_eval() -> None:
     # Load metrics from all modes
     all_m = get_latest_metrics("all")
     l1_m = get_latest_metrics("l1")
+    l2_m = f"l2_m" # Note: keeping original variables initialized
     l2_m = get_latest_metrics("l2")
     l3_m = get_latest_metrics("l3")
 

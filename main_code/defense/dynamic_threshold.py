@@ -71,13 +71,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta", type=float, default=1.5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--default_lang", type=str, default="c")
+    parser.add_argument("--mode", type=str, default="all", choices=["all", "l1", "l2", "l3"], help="Select optimization layer mode")
     parser.add_argument("--train_ratio", type=float, default=0.60)
     parser.add_argument("--val_ratio", type=float, default=0.20)
     parser.add_argument("--test_ratio", type=float, default=0.20)
-    parser.add_argument("--max_grid_trials", type=int, default=100000)
-    parser.add_argument("--out_dir", type=str, default="result/debug_logs", help="Root output directory. Results are written to {out_dir}/{attack_type}.")
+    parser.add_argument("--out_dir", type=str, default="result/debug_logs", help="Root output directory.")
     parser.add_argument("--debug_limit", type=int, default=20)
-    parser.add_argument("--no_4bit", action="store_true", help="Disable 4-bit loading. Useful when bitsandbytes is unavailable.")
+    parser.add_argument("--no_4bit", action="store_true", help="Disable 4-bit loading.")
     parser.add_argument("--pull_tree_sitter", action="store_true")
     return parser
 
@@ -85,12 +85,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5) -> float:
     fpr = fp / (fp + tn) if (tn + fp) > 0 else 0.0
     f_beta = f_beta_score(tp, fp, fn, beta=beta)
-    
-    # 讓 (1 - fpr) 成為權重。FPR 越低，保留的 F-beta 分數比例越高
-    # 例如 FPR = 5%，分數打 95 折；FPR = 20%，分數打 8 折
-    score = f_beta * (1.0 - fpr)
-    
-    return float(score)
+    return float(f_beta * (1.0 - fpr))
 
 
 def load_model_and_tokenizer(args: argparse.Namespace):
@@ -103,10 +98,8 @@ def load_model_and_tokenizer(args: argparse.Namespace):
     model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
     if not args.no_4bit and BitsAndBytesConfig is not None:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
+            load_in_4bit=True, bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.float16,
         )
     else:
         model_kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
@@ -114,8 +107,7 @@ def load_model_and_tokenizer(args: argparse.Namespace):
     if "codegen" not in args.model_id.lower():
         model_kwargs["attn_implementation"] = "sdpa"
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_id, **model_kwargs)
-    model.eval()
+    model = AutoModelForCausalLM.from_pretrained(args.model_id, **model_kwargs).eval()
     device = model.device if hasattr(model, "device") else next(model.parameters()).device
     return model, tokenizer, device
 
@@ -143,9 +135,8 @@ def build_guardrails(args: argparse.Namespace, model, tokenizer, device):
 
 
 def load_pairs(args: argparse.Namespace) -> list[dict[str, Any]]:
-    files_to_load = sorted(resolve_dataset_paths(args.attack_type))
     pairs = []
-    for file_path in files_to_load:
+    for file_path in sorted(resolve_dataset_paths(args.attack_type)):
         if not os.path.exists(file_path):
             print(f"[!] File not found: {file_path}")
             continue
@@ -161,18 +152,12 @@ def load_pairs(args: argparse.Namespace) -> list[dict[str, Any]]:
 
                 code = clean_dataset_metadata(entry.get("code", ""))
                 adv_code = clean_dataset_metadata(entry.get("adv_code", ""))
-                if not code or not adv_code:
-                    continue
-
-                source = entry.get("dataset_source") or entry.get("attack_type") or os.path.basename(file_path)
-                lang = entry.get("language", entry.get("lang", ""))
-                pairs.append(
-                    {
-                        "source": source,
-                        "benign": {"code": code, "lang": lang},
-                        "adv": {"code": adv_code, "lang": lang},
-                    }
-                )
+                if code and adv_code:
+                    pairs.append({
+                        "source": entry.get("dataset_source") or entry.get("attack_type") or os.path.basename(file_path),
+                        "benign": {"code": code, "lang": entry.get("language", entry.get("lang", ""))},
+                        "adv": {"code": adv_code, "lang": entry.get("language", entry.get("lang", ""))},
+                    })
     return pairs
 
 
@@ -200,7 +185,7 @@ def balanced_select_pairs(pairs: list[dict[str, Any]], num_pairs_needed: int, se
 def split_pairs(pairs: list[dict[str, Any]], train_ratio: float, val_ratio: float, test_ratio: float, seed: int):
     ratio_sum = train_ratio + val_ratio + test_ratio
     if ratio_sum <= 0:
-        raise ValueError("train/val/test ratios must sum to a positive value")
+        raise ValueError("Ratios must sum to a positive value")
     train_ratio, val_ratio, test_ratio = train_ratio / ratio_sum, val_ratio / ratio_sum, test_ratio / ratio_sum
 
     rng = random.Random(seed)
@@ -209,22 +194,15 @@ def split_pairs(pairs: list[dict[str, Any]], train_ratio: float, val_ratio: floa
         grouped[pair["source"]].append(pair)
 
     splits = {"train": [], "val": [], "test": []}
-    for source, group in grouped.items():
+    for group in grouped.values():
         rng.shuffle(group)
         n = len(group)
-        n_train = int(round(n * train_ratio))
-        n_val = int(round(n * val_ratio))
-        if n >= 3:
-            n_train = max(1, min(n_train, n - 2))
-            n_val = max(1, min(n_val, n - n_train - 1))
-        else:
-            n_train = max(1, min(n_train, n))
-            n_val = 0
+        n_train = max(1, min(int(round(n * train_ratio)), n - 2)) if n >= 3 else max(1, min(int(round(n * train_ratio)), n))
+        n_val = max(1, min(int(round(n * val_ratio)), n - n_train - 1)) if n >= 3 else 0
         splits["train"].extend(group[:n_train])
         splits["val"].extend(group[n_train : n_train + n_val])
         splits["test"].extend(group[n_train + n_val :])
 
-    # If a tiny dataset left val/test empty, fall back to a global shuffle split.
     if not splits["val"] or not splits["test"]:
         shuffled = list(pairs)
         rng.shuffle(shuffled)
@@ -242,13 +220,9 @@ def split_pairs(pairs: list[dict[str, Any]], train_ratio: float, val_ratio: floa
 def extract_one(code: str, lang: str, guardrails, default_lang: str) -> dict[str, Any]:
     lang = normalize_language(lang, code, default_lang)
     g = guardrails.get(lang) or guardrails.get(default_lang) or next(iter(guardrails.values()))
-    pre = g["pre_filter"]
-    adv = g["adv_guard"]
-    sem = g["sem_guard"]
-
-    features = pre.extract_threshold_features(code)
-    features["adv_features"] = adv.extract_adv_features(code)
-    features["sem_features"] = sem.extract_semantic_features(code)
+    features = g["pre_filter"].extract_threshold_features(code)
+    features["adv_features"] = g["adv_guard"].extract_adv_features(code)
+    features["sem_features"] = g["sem_guard"].extract_semantic_features(code)
     return features
 
 
@@ -261,76 +235,51 @@ def extract_split_records(splits, guardrails, args: argparse.Namespace) -> list[
                 code = item["code"]
                 lang = normalize_language(item.get("lang"), code, args.default_lang)
                 feat = extract_one(code, lang, guardrails, args.default_lang)
-                feat.update(
-                    {
-                        "label": label,
-                        "split": split_name,
-                        "source": pair["source"],
-                        "kind": label_name,
-                        "lang": lang,
-                        "pair_id": idx,
-                        "full_code": code,
-                        "code_snippet": code[:200].replace("\n", " "),
-                    }
-                )
+                feat.update({
+                    "label": label, "split": split_name, "source": pair["source"],
+                    "kind": label_name, "lang": lang, "pair_id": idx, "full_code": code,
+                    "code_snippet": code[:200].replace("\n", " "),
+                })
                 records.append(feat)
     return records
 
 
 def prepare_vector_data(records: list[dict[str, Any]]) -> dict[str, Any]:
     n = len(records)
-    labels = np.array([item["label"] for item in records], dtype=np.int32)
-
     v_data: dict[str, Any] = {
         "records": records,
-        "labels": labels,
+        "labels": np.array([item["label"] for item in records], dtype=np.int32),
         "split": np.array([item["split"] for item in records], dtype=object),
-        "s1_hard": np.array([bool(item.get("s1_hard", False)) for item in records], dtype=bool),
-        "s1_word": np.array([item.get("s1_max_word", 0) for item in records], dtype=np.float32),
-        "s1_spec_string": np.array([item.get("s1_spec_string", 0.0) for item in records], dtype=np.float32),
-        "s1_spec_identifier": np.array([item.get("s1_spec_identifier", 0.0) for item in records], dtype=np.float32),
-        "s1_spec_comment": np.array([item.get("s1_spec_comment", 0.0) for item in records], dtype=np.float32),
-        "s1_spec_error": np.array([item.get("s1_spec_error", 0.0) for item in records], dtype=np.float32),
-        "s1_non_ascii": np.array([item.get("s1_non_ascii", 0.0) for item in records], dtype=np.float32),
     }
 
-    adv_comment_eff = np.full(n, -999.0, dtype=np.float32)
-    adv_string_eff = np.full(n, -999.0, dtype=np.float32)
-    adv_id_eff = np.full(n, -999.0, dtype=np.float32)
+    s1_fields = [
+        ("s1_hard", bool, False), ("s1_word", np.float32, 0.0), ("s1_spec_string", np.float32, 0.0),
+        ("s1_spec_identifier", np.float32, 0.0), ("s1_spec_comment", np.float32, 0.0),
+        ("s1_spec_error", np.float32, 0.0), ("s1_non_ascii", np.float32, 0.0)
+    ]
+    for key, dtype, default in s1_fields:
+        v_data[key] = np.array([item.get(key, default) for item in records], dtype=dtype)
+
+    adv_map = {"comment": "adv_comment_eff", "string": "adv_string_eff", "identifier": "adv_id_eff"}
+    adv_arrays = {target_key: np.full(n, -999.0, dtype=np.float32) for target_key in adv_map.values()}
     for i, item in enumerate(records):
         for feature in item.get("adv_features", []):
             kind, eff = adv_effective_score(feature)
-            if kind == "comment":
-                adv_comment_eff[i] = max(adv_comment_eff[i], eff)
-            elif kind == "string":
-                adv_string_eff[i] = max(adv_string_eff[i], eff)
-            elif kind == "identifier":
-                adv_id_eff[i] = max(adv_id_eff[i], eff)
+            if kind in adv_map:
+                adv_arrays[adv_map[kind]][i] = max(adv_arrays[adv_map[kind]][i], eff)
+    v_data.update(adv_arrays)
 
-    v_data.update(
-        {
-            "adv_comment_eff": adv_comment_eff,
-            "adv_string_eff": adv_string_eff,
-            "adv_id_eff": adv_id_eff,
-        }
-    )
-
-    sem_indices, sem_influences, sem_surprises, sem_factors, sem_z_scores = [], [], [], [], []
+    sem_keys = ["influence", "surprise", "factor", "z_score"]
+    sem_lists = {k: [] for k in sem_keys}
+    sem_indices = []
     for i, item in enumerate(records):
         for feature in item.get("sem_features", []):
             sem_indices.append(i)
-            sem_influences.append(float(feature.get("influence", 0.0)))
-            sem_surprises.append(float(feature.get("surprise", 0.0)))
-            sem_factors.append(float(feature.get("factor", 1.0)))
-            sem_z_scores.append(float(feature.get("z_score", 0.0)))
+            for k in sem_keys:
+                sem_lists[k].append(float(feature.get(k, 1.0 if k == "factor" else 0.0)))
 
-    v_data["sem"] = {
-        "indices": np.array(sem_indices, dtype=np.int32),
-        "influence": np.array(sem_influences, dtype=np.float32),
-        "surprise": np.array(sem_surprises, dtype=np.float32),
-        "factor": np.array(sem_factors, dtype=np.float32),
-        "z_score": np.array(sem_z_scores, dtype=np.float32),
-    }
+    v_data["sem"] = {k: np.array(v, dtype=np.float32) for k, v in sem_lists.items()}
+    v_data["sem"]["indices"] = np.array(sem_indices, dtype=np.int32)
     return v_data
 
 
@@ -338,17 +287,15 @@ def mask_split(v_data: dict[str, Any], split: str) -> np.ndarray:
     return v_data["split"] == split
 
 
-def simulate_pipeline_vectorized(v_data: dict[str, Any], params: dict[str, Any], mask: np.ndarray | None = None) -> dict[str, Any]:
-    n_total = len(v_data["labels"])
+def simulate_pipeline_vectorized(v_data: dict[str, Any], params: dict[str, Any], mask: np.ndarray | None = None, mode: str = "all") -> dict[str, Any]:
     if mask is None:
-        mask = np.ones(n_total, dtype=bool)
+        mask = np.ones(len(v_data["labels"]), dtype=bool)
     selected_indices = np.where(mask)[0]
-    local_pos = {int(global_idx): pos for pos, global_idx in enumerate(selected_indices)}
+    local_pos = {int(g_idx): pos for pos, g_idx in enumerate(selected_indices)}
     n = len(selected_indices)
-
     y_true = v_data["labels"][mask]
 
-    s1_det_full = (
+    s1_det = (
         v_data["s1_hard"]
         | (v_data["s1_word"] > params["th_s1_w"])
         | (v_data["s1_spec_string"] > params["th_s1_str"])
@@ -356,60 +303,39 @@ def simulate_pipeline_vectorized(v_data: dict[str, Any], params: dict[str, Any],
         | (v_data["s1_spec_comment"] > params["th_s1_comment"])
         | (v_data["s1_spec_error"] > params["th_s1_error"])
         | (v_data["s1_non_ascii"] > params["th_s1_a"])
-    )
-    s1_det = s1_det_full[mask]
+    )[mask] if mode in ("all", "l1") else np.zeros(n, dtype=bool)
 
-    s2_det_full = (
+    s2_det_raw = (
         (v_data["adv_comment_eff"] > params["th_adv"])
         | (v_data["adv_string_eff"] > params["th_str"])
         | (v_data["adv_id_eff"] > params["th_adv"])
-    )
-    s2_det = s2_det_full[mask]
+    )[mask] if mode in ("all", "l2") else np.zeros(n, dtype=bool)
+    s2_det = s2_det_raw & (~s1_det)
 
     s3_det = np.zeros(n, dtype=bool)
     sem = v_data["sem"]
-    if len(sem["indices"]) > 0 and n > 0:
-        global_mask_lookup = set(int(i) for i in selected_indices)
-        sem_global_indices = sem["indices"]
-        keep = np.array([int(i) in global_mask_lookup for i in sem_global_indices], dtype=bool)
+    if mode in ("all", "l3") and len(sem["indices"]) > 0 and n > 0:
+        keep = np.isin(sem["indices"], selected_indices)
         if np.any(keep):
-            kept_globals = sem_global_indices[keep]
-            local_indices = np.array([local_pos[int(g)] for g in kept_globals], dtype=np.int32)
-            min_threshold = params["th_l3"] * 0.1
+            local_indices = np.array([local_pos[int(g)] for g in sem["indices"][keep]], dtype=np.int32)
             dyn_thresholds = np.maximum(
-                min_threshold,
+                params["th_l3"] * 0.1,
                 (params["th_l3"] * sem["factor"][keep]) / (1.0 + (sem["surprise"][keep] * params["t_l3"])),
             )
-            triggered_nodes = (
-                (sem["surprise"][keep] >= params["l3_min_surprise"])
-                & ((sem["influence"][keep] > dyn_thresholds) | (sem["z_score"][keep] > params["l3_z_trigger"]))
+            triggered = (sem["surprise"][keep] >= params["l3_min_surprise"]) & (
+                (sem["influence"][keep] > dyn_thresholds) | (sem["z_score"][keep] > params["l3_z_trigger"])
             )
-            sem_triggered_counts = np.bincount(local_indices, weights=triggered_nodes.astype(np.int32), minlength=n)
-            s3_det = sem_triggered_counts > 0
+            s3_det_raw = np.bincount(local_indices, weights=triggered.astype(np.int32), minlength=n) > 0
+            s3_det = s3_det_raw & (~(s1_det | s2_det))
 
     detected = s1_det | s2_det | s3_det
-
-    tp = int(np.sum((detected == True) & (y_true == 1)))
-    fp = int(np.sum((detected == True) & (y_true == 0)))
-    fn = int(np.sum((detected == False) & (y_true == 1)))
-    tn = int(np.sum((detected == False) & (y_true == 0)))
-
     return {
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
-        "tn": tn,
-        "s1_tp": int(np.sum((s1_det == True) & (y_true == 1))),
-        "s1_fp": int(np.sum((s1_det == True) & (y_true == 0))),
-        "s2_tp": int(np.sum((s2_det == True) & (y_true == 1))),
-        "s2_fp": int(np.sum((s2_det == True) & (y_true == 0))),
-        "s3_tp": int(np.sum((s3_det == True) & (y_true == 1))),
-        "s3_fp": int(np.sum((s3_det == True) & (y_true == 0))),
-        "y_true": y_true,
-        "detected": detected,
-        "s1_det": s1_det,
-        "s2_det": s2_det,
-        "s3_det": s3_det,
+        "tp": int(np.sum(detected & (y_true == 1))), "fp": int(np.sum(detected & (y_true == 0))),
+        "fn": int(np.sum(~detected & (y_true == 1))), "tn": int(np.sum(~detected & (y_true == 0))),
+        "s1_tp": int(np.sum(s1_det & (y_true == 1))), "s1_fp": int(np.sum(s1_det & (y_true == 0))),
+        "s2_tp": int(np.sum(s2_det & (y_true == 1))), "s2_fp": int(np.sum(s2_det & (y_true == 0))),
+        "s3_tp": int(np.sum(s3_det & (y_true == 1))), "s3_fp": int(np.sum(s3_det & (y_true == 0))),
+        "y_true": y_true, "detected": detected, "s1_det": s1_det, "s2_det": s2_det, "s3_det": s3_det,
         "selected_indices": selected_indices,
     }
 
@@ -417,77 +343,68 @@ def simulate_pipeline_vectorized(v_data: dict[str, Any], params: dict[str, Any],
 def default_param_candidates() -> list[dict[str, Any]]:
     return [
         {
-            "th_adv": 16.0,
-            "th_str": 15.0,
-            "th_l3": 0.26,
-            "t_l3": 0.01,
-            "l3_min_surprise": 0.15,
-            "l3_z_trigger": 3.5,
-            "th_s1_w": 50,
-            "th_s1_str": 0.25,
-            "th_s1_identifier": 0.35,
-            "th_s1_comment": 0.45,
-            "th_s1_error": 0.08,
-            "th_s1_a": 0.001,
+            "th_adv": 16.0, "th_str": 15.0, "th_l3": 0.26, "t_l3": 0.01, "l3_min_surprise": 0.15, "l3_z_trigger": 3.5,
+            "th_s1_w": 50, "th_s1_str": 0.25, "th_s1_identifier": 0.35, "th_s1_comment": 0.45, "th_s1_error": 0.08, "th_s1_a": 0.001,
         },
         {
-            "th_adv": 18.0,
-            "th_str": 15.0,
-            "th_l3": 0.26,
-            "t_l3": 0.05,
-            "l3_min_surprise": 0.20,
-            "l3_z_trigger": 3.5,
-            "th_s1_w": 100,
-            "th_s1_str": 0.35,
-            "th_s1_identifier": 0.35,
-            "th_s1_comment": 0.45,
-            "th_s1_error": 0.08,
-            "th_s1_a": 0.001,
+            "th_adv": 18.0, "th_str": 15.0, "th_l3": 0.26, "t_l3": 0.05, "l3_min_surprise": 0.20, "l3_z_trigger": 3.5,
+            "th_s1_w": 100, "th_s1_str": 0.35, "th_s1_identifier": 0.35, "th_s1_comment": 0.45, "th_s1_error": 0.08, "th_s1_a": 0.001,
         },
     ]
 
 
-def generate_param_candidates(max_trials: int, seed: int) -> list[dict[str, Any]]:
-    spaces = {
-        "th_adv": np.arange(12.0, 26.1, 2.0),
-        "th_str": np.arange(12.0, 24.1, 2.0),
-        "th_l3": np.arange(0.15, 0.56, 0.05),
-        "t_l3": np.arange(0.05, 0.36, 0.05),
-        "l3_min_surprise": np.arange(0.15, 0.51, 0.05),
-        "l3_z_trigger": np.arange(2.0, 4.6, 0.5),
-        "th_s1_w": np.arange(50, 201, 50),
-        "th_s1_str": np.arange(0.20, 0.46, 0.05),
-        "th_s1_identifier": np.arange(0.10, 0.36, 0.05),
-        "th_s1_comment": np.arange(0.30, 0.56, 0.05),
-        "th_s1_error": np.arange(0.01, 0.16, 0.03),
-        "th_s1_a": [0.0005, 0.001, 0.005, 0.01, 0.05],
-    }
+def generate_param_candidates(seed: int, mode: str = "all") -> list[dict[str, Any]]:
+    if mode == "all":
+        spaces = {
+            "th_adv": np.arange(8.0, 20.1, 1.0),
+            "th_str": np.arange(8.0, 20.1, 1.0),
+            "th_l3": np.arange(0.20, 0.61, 0.05),
+            "t_l3": [0.10, 0.20],
+            "l3_min_surprise": [0.15, 0.25],
+            "l3_z_trigger": [2.0, 3.0],
+            "th_s1_w": [200, 400, 800],
+            "th_s1_str": [0.80, 1.20],
+            "th_s1_identifier": [0.80, 1.20],
+            "th_s1_comment": [0.90, 1.20],
+            "th_s1_error": [0.50, 1.20],
+            "th_s1_a": [0.05, 0.20],
+        }
+    else:
+        # Optimize individual layer spaces by freezing inactive layer params
+        spaces = {
+            "th_adv": np.arange(4.0, 16.1, 1.0) if mode == "l2" else [15.0],
+            "th_str": np.arange(4.0, 16.1, 1.0) if mode == "l2" else [12.0],
+            "th_l3": np.arange(0.10, 0.31, 0.05) if mode == "l3" else [0.3],
+            "t_l3": [0.10, 0.20] if mode == "l3" else [0.1],
+            "l3_min_surprise": [0.15, 0.25] if mode == "l3" else [0.15],
+            "l3_z_trigger": [2.0, 3.0] if mode == "l3" else [3.0],
+            "th_s1_w": [200, 400, 800, 1200] if mode == "l1" else [100],
+            "th_s1_str": [0.60, 0.80, 1.20] if mode == "l1" else [0.4],
+            "th_s1_identifier": [0.60, 0.80, 1.20] if mode == "l1" else [0.4],
+            "th_s1_comment": [0.70, 0.90, 1.20] if mode == "l1" else [0.5],
+            "th_s1_error": [0.50, 1.20] if mode == "l1" else [0.15],
+            "th_s1_a": [0.05, 0.20] if mode == "l1" else [0.01],
+        }
 
     keys = list(spaces.keys())
-    rng = random.Random(seed)
     candidates = default_param_candidates()
     seen = {tuple(sorted(c.items())) for c in candidates}
 
-    # Full product is intentionally huge; sample deterministically.
-    while len(candidates) < max_trials:
-        params = {key: rng.choice(spaces[key]) for key in keys}
+    for values in itertools.product(*(spaces[k] for k in keys)):
+        params = dict(zip(keys, values))
         key = tuple(sorted(params.items()))
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(params)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(params)
     return candidates
 
 
 def select_best_params(v_data: dict[str, Any], candidates: list[dict[str, Any]], args: argparse.Namespace):
-    train_mask = mask_split(v_data, "train")
-    val_mask = mask_split(v_data, "val")
-
-    best = None
-    fallback = None
+    train_mask, val_mask = mask_split(v_data, "train"), mask_split(v_data, "val")
+    best, fallback = None, None
 
     for params in tqdm(candidates, desc="Search thresholds", ncols=100):
-        train = simulate_pipeline_vectorized(v_data, params, train_mask)
+        train = simulate_pipeline_vectorized(v_data, params, train_mask, mode=args.mode)
         train_score = objective_function(train["tp"], train["fp"], train["fn"], train["tn"], args.beta)
         train_metrics = compute_metrics(train["tp"], train["fp"], train["fn"], train["tn"])
 
@@ -498,29 +415,18 @@ def select_best_params(v_data: dict[str, Any], candidates: list[dict[str, Any]],
         if train_score < 0:
             continue
 
-        val = simulate_pipeline_vectorized(v_data, params, val_mask)
+        val = simulate_pipeline_vectorized(v_data, params, val_mask, mode=args.mode)
         val_score = objective_function(val["tp"], val["fp"], val["fn"], val["tn"], args.beta)
         val_metrics = compute_metrics(val["tp"], val["fp"], val["fn"], val["tn"])
         train_key = (val_score, train_score, val_metrics.recall, -val_metrics.fpr, val_metrics.precision)
         if best is None or train_key > best["key"]:
-            best = {
-                "params": params,
-                "train": train,
-                "val": val,
-                "train_score": train_score,
-                "val_score": val_score,
-                "key": train_key,
-            }
+            best = {"params": params, "train": train, "val": val, "train_score": train_score, "val_score": val_score, "key": train_key}
 
     if best is None:
         print("[!] No candidate satisfied the train FPR constraint. Falling back to best train objective.")
-        params = fallback["params"]
         best = {
-            "params": params,
-            "train": fallback["train"],
-            "val": simulate_pipeline_vectorized(v_data, params, val_mask),
-            "train_score": fallback["train_score"],
-            "val_score": -1.0,
+            "params": fallback["params"], "train": fallback["train"], "train_score": fallback["train_score"], "val_score": -1.0,
+            "val": simulate_pipeline_vectorized(v_data, fallback["params"], val_mask, mode=args.mode),
         }
     return best
 
@@ -534,50 +440,38 @@ def summarize_counts(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def export_error_samples(v_data: dict[str, Any], params: dict[str, Any], split: str, out_dir: str, limit: int) -> None:
-    result = simulate_pipeline_vectorized(v_data, params, mask_split(v_data, split))
-    selected_indices = result["selected_indices"]
+def export_error_samples(v_data: dict[str, Any], params: dict[str, Any], split: str, out_dir: str, limit: int, mode: str = "all") -> None:
+    result = simulate_pipeline_vectorized(v_data, params, mask_split(v_data, split), mode=mode)
     records = v_data["records"]
 
-    fp_path = os.path.join(out_dir, f"{split}_fp_samples.jsonl")
-    fn_path = os.path.join(out_dir, f"{split}_fn_samples.jsonl")
-    fp_written = fn_written = 0
-    with open(fp_path, "w", encoding="utf-8") as fp_f, open(fn_path, "w", encoding="utf-8") as fn_f:
-        for local_i, global_i in enumerate(selected_indices):
-            y = int(result["y_true"][local_i])
-            pred = bool(result["detected"][local_i])
+    fp_f = open(os.path.join(out_dir, f"{split}_fp_samples.jsonl"), "w", encoding="utf-8")
+    fn_f = open(os.path.join(out_dir, f"{split}_fn_samples.jsonl"), "w", encoding="utf-8")
+    counts = {"fp": 0, "fn": 0}
+    s1_keys = ["hard", "word", "spec_string", "spec_identifier", "spec_comment", "spec_error", "non_ascii"]
+
+    for local_i, global_i in enumerate(result["selected_indices"]):
+        y = int(result["y_true"][local_i])
+        pred = bool(result["detected"][local_i])
+
+        if (y == 0 and pred and counts["fp"] < limit) or (y == 1 and not pred and counts["fn"] < limit):
             record = records[int(global_i)]
             item = {
-                "split": split,
-                "label": y,
-                "predicted_detected": pred,
-                "source": record.get("source"),
-                "kind": record.get("kind"),
-                "lang": record.get("lang"),
-                "layer_triggers": {
-                    "L1": bool(result["s1_det"][local_i]),
-                    "L2": bool(result["s2_det"][local_i]),
-                    "L3": bool(result["s3_det"][local_i]),
-                },
+                "split": split, "label": y, "predicted_detected": pred,
+                "source": record.get("source"), "kind": record.get("kind"), "lang": record.get("lang"),
+                "layer_triggers": {"L1": bool(result["s1_det"][local_i]), "L2": bool(result["s2_det"][local_i]), "L3": bool(result["s3_det"][local_i])},
                 "code": record.get("full_code", ""),
-                "s1_features": {
-                    "hard": bool(record.get("s1_hard", False)),
-                    "word": record.get("s1_max_word", 0),
-                    "spec_string": record.get("s1_spec_string", 0.0),
-                    "spec_identifier": record.get("s1_spec_identifier", 0.0),
-                    "spec_comment": record.get("s1_spec_comment", 0.0),
-                    "spec_error": record.get("s1_spec_error", 0.0),
-                    "non_ascii": record.get("s1_non_ascii", 0.0),
-                },
-                "adv_features": record.get("adv_features", [])[:5],
-                "sem_features": record.get("sem_features", [])[:5],
+                "s1_features": {k: record.get(f"s1_{k}" if k != "word" else "s1_max_word", False if k == "hard" else 0.0) for k in s1_keys},
+                "adv_features": record.get("adv_features", [])[:5], "sem_features": record.get("sem_features", [])[:5],
             }
-            if y == 0 and pred and fp_written < limit:
+            if y == 0:
                 fp_f.write(json.dumps(item, cls=NumpyEncoder) + "\n")
-                fp_written += 1
-            elif y == 1 and not pred and fn_written < limit:
+                counts["fp"] += 1
+            else:
                 fn_f.write(json.dumps(item, cls=NumpyEncoder) + "\n")
-                fn_written += 1
+                counts["fn"] += 1
+
+    fp_f.close()
+    fn_f.close()
 
 
 def main() -> None:
@@ -589,58 +483,40 @@ def main() -> None:
     if not all_pairs:
         raise RuntimeError("No valid dataset pairs found.")
 
-    num_pairs_needed = max(1, args.num_samples // 2)
-    selected_pairs = balanced_select_pairs(all_pairs, num_pairs_needed, args.seed)
+    selected_pairs = balanced_select_pairs(all_pairs, max(1, args.num_samples // 2), args.seed)
     print(f"[-] Selected {len(selected_pairs)} pairs ({len(selected_pairs) * 2} samples).")
 
     splits = split_pairs(selected_pairs, args.train_ratio, args.val_ratio, args.test_ratio, args.seed)
-    print(
-        f"[-] Split pairs: train={len(splits['train'])}, val={len(splits['val'])}, test={len(splits['test'])}"
-    )
+    print(f"[-] Split pairs: train={len(splits['train'])}, val={len(splits['val'])}, test={len(splits['test'])}")
 
     model, tokenizer, device = load_model_and_tokenizer(args)
     guardrails = build_guardrails(args, model, tokenizer, device)
 
-    records = extract_split_records(splits, guardrails, args)
-    v_data = prepare_vector_data(records)
-
-    candidates = generate_param_candidates(args.max_grid_trials, args.seed)
-    best = select_best_params(v_data, candidates, args)
+    v_data = prepare_vector_data(extract_split_records(splits, guardrails, args))
+    best = select_best_params(v_data, generate_param_candidates(args.seed, args.mode), args)
     best_params = best["params"]
 
-    test = simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "test"))
-    train = simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "train"))
-    val = simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "val"))
-
-    run_name = "_".join(args.attack_type)
-    out_dir = os.path.join(args.out_dir, run_name)
+    out_dir = os.path.join(args.out_dir, "_".join(args.attack_type))
     ensure_dirs(out_dir)
 
     summary = {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "model": args.model_id,
-        "attack_type": args.attack_type,
-        "num_pairs": len(selected_pairs),
-        "beta": args.beta,
-        "optimal_params": best_params,
-        "train": summarize_counts(train),
-        "val": summarize_counts(val),
-        "test": summarize_counts(test),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "model": args.model_id, "attack_type": args.attack_type,
+        "num_pairs": len(selected_pairs), "beta": args.beta, "optimal_params": best_params,
+        "train": summarize_counts(simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "train"), mode=args.mode)),
+        "val": summarize_counts(simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "val"), mode=args.mode)),
+        "test": summarize_counts(simulate_pipeline_vectorized(v_data, best_params, mask_split(v_data, "test"), mode=args.mode)),
     }
-
-    with open(os.path.join(out_dir, "optimal_params.json"), "w", encoding="utf-8") as f:
+    param_filename = "optimal_params.json" if args.mode == "all" else f"{args.mode}_optimal_params.json"
+    with open(os.path.join(out_dir, param_filename), "w", encoding="utf-8") as f:
         json.dump(best_params, f, indent=2, cls=NumpyEncoder)
     with open(os.path.join(out_dir, "metrics_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, cls=NumpyEncoder)
 
-    export_error_samples(v_data, best_params, "train", out_dir, args.debug_limit)
-    export_error_samples(v_data, best_params, "val", out_dir, args.debug_limit)
-    export_error_samples(v_data, best_params, "test", out_dir, args.debug_limit)
+    for s in ["train", "val", "test"]:
+        export_error_samples(v_data, best_params, s, out_dir, args.debug_limit, mode=args.mode)
 
-    print("\n[+] Best params:")
-    print(json.dumps(best_params, indent=2, cls=NumpyEncoder))
-    print("\n[+] Test metrics:")
-    print(json.dumps(summary["test"], indent=2, cls=NumpyEncoder))
+    print("\n[+] Best params:\n", json.dumps(best_params, indent=2, cls=NumpyEncoder))
+    print("\n[+] Test metrics:\n", json.dumps(summary["test"], indent=2, cls=NumpyEncoder))
     print(f"\n[+] Wrote results to: {out_dir}")
 
 

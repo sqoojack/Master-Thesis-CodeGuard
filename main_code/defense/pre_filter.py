@@ -134,7 +134,7 @@ class PreFilter:
                 return False, None
 
         non_ascii_count = sum(1 for c in text if ord(c) > 127)
-        if non_ascii_count > 5:
+        if non_ascii_count > 5 and kind not in {"comment", "string"}:
             non_ascii_ratio = non_ascii_count / max(1, len(text))
             if non_ascii_ratio > self.s1_ascii:
                 return True, f"High_Non_ASCII_Ratio ({non_ascii_ratio:.2f})"
@@ -354,7 +354,7 @@ class PreFilter:
                         features[key] = max(features[key], ratio)
 
                     non_ascii_count = sum(1 for c in text if ord(c) > 127)
-                    if non_ascii_count > 5:
+                    if non_ascii_count > 5 and kind not in {"comment", "string"}:
                         features["s1_non_ascii"] = max(features["s1_non_ascii"], non_ascii_count / max(1, len(text)))
 
         return features

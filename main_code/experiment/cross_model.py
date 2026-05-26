@@ -7,10 +7,10 @@ Test models:
 
 Example:
 python main_code/experiment/cross_model.py --attack_type Tranfer_2_codegen --gpu_id 0
-python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 1 --run_paras --threshold_beta 1.5
+python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 0 --run_paras --threshold_beta 1.5
 python main_code/experiment/cross_model.py --attack_type CoTDeceptor --gpu_id 1 
 python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id 1 --run_paras
-python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 0 --run_paras
+python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 1 --run_paras --threshold_beta 1.0
 """
 
 import os
@@ -18,6 +18,7 @@ import sys
 import argparse
 import subprocess
 from pathlib import Path
+import json
 
 
 # ---------------------------------------------------------------------
@@ -59,7 +60,7 @@ def build_command(
         "--model_id",
         model_id,
         "--eval_out_dir",
-        "result",
+        "result/evaluation",
         "-bs",
         str(batch_size),
         "--batch_token_budget",
@@ -113,21 +114,32 @@ def build_subprocess_env(gpu_id: str) -> dict:
     return env
 
 
-def ensure_optimized_params(args: argparse.Namespace, param_file: str) -> None:
+def ensure_optimized_params(args: argparse.Namespace, param_file: str, model_id: str) -> None:
     """Generate optimal_params.json automatically when it does not exist or when forced."""
-    if os.path.exists(param_file) and not args.run_paras:
+
+    summary_file = os.path.join(os.path.dirname(param_file), "metrics_summary.json")
+    is_same_model = False
+    if os.path.exists(summary_file) and os.path.exists(param_file):
+        try:
+            with open(summary_file, "r", encoding="utf-8") as f:
+                if json.load(f).get("model") == model_id:
+                    is_same_model = True
+        except Exception:
+            pass
+
+    if is_same_model and not args.run_paras:
         return
 
     if args.run_paras:
-        print(f"[*] Force running dynamic_threshold.py for attack_type='{args.attack_type}'...")
+        print(f"[*] Force running dynamic_threshold.py for attack_type='{args.attack_type}' and model='{model_id}'...")
     else:
-        print(f"[!] Parameter file not found at {param_file}")
-        print(f"[*] Running dynamic_threshold.py for attack_type='{args.attack_type}' first...")
+        print(f"[!] Parameter file missing or belongs to another model at {param_file}")
+        print(f"[*] Running dynamic_threshold.py for attack_type='{args.attack_type}' and model='{model_id}' first...")
 
     env = build_subprocess_env(args.gpu_id)
     cmd = build_dynamic_threshold_command(
         attack_type=args.attack_type,
-        model_id=args.threshold_model_id,
+        model_id=model_id,
         num_samples=args.threshold_num_samples,
         batch_size=args.batch_size,
         batch_token_budget=args.batch_token_budget,
@@ -181,12 +193,6 @@ def run_cross_model_eval() -> None:
         help="Max padded tokens per guardrail scoring microbatch.",
     )
     parser.add_argument(
-        "--threshold_model_id",
-        type=str,
-        default="Salesforce/codegen-350M-mono",
-        help="Model used by dynamic_threshold.py when optimal_params.json is missing.",
-    )
-    parser.add_argument(
         "--threshold_num_samples",
         type=int,
         default=300,
@@ -228,7 +234,6 @@ def run_cross_model_eval() -> None:
         # "google/gemma-4-E4B-it",
         # "mistralai/Mistral-7B-Instruct-v0.3"
     ]
-
     # Dataset path is now resolved by the shared resolver.
     input_path = resolve_dataset_path(args.attack_type)
 
@@ -239,17 +244,6 @@ def run_cross_model_eval() -> None:
         print(f"[!] Error: Dataset file not found at {input_path}")
         return
 
-    try:
-        ensure_optimized_params(args, param_file)
-    except (RuntimeError, FileNotFoundError) as exc:
-        print(f"[!] Error: {exc}")
-        return
-
-    # Check if user only wants to tune thresholds and skip evaluation
-    if args.only_tune:
-        print("[+] Parameter tuning completed. Skipping model evaluation loop as requested.")
-        return
-
     print("[*] Initializing Cross-Model Evaluation...")
     print(f"[*] Attack Category: {args.attack_type}")
     print(f"[*] Source Dataset: {input_path}")
@@ -257,6 +251,16 @@ def run_cross_model_eval() -> None:
     print(f"[*] Using GPU: {args.gpu_id}")
 
     for model_id in models_to_test:
+        print(f"\n[*] Processing Parameter Tuning for Model: {model_id}")
+        try:
+            ensure_optimized_params(args, param_file, model_id)
+        except (RuntimeError, FileNotFoundError) as exc:
+            print(f"[!] Error: {exc}. Skipping current model...")
+            continue
+
+        if args.only_tune:
+            continue
+
         env = build_subprocess_env(args.gpu_id)
         cmd = build_command(
             attack_type=args.attack_type,
@@ -273,6 +277,8 @@ def run_cross_model_eval() -> None:
         except subprocess.CalledProcessError as e:
             print(f"[!] Evaluation failed for {model_id} with error: {e}. Moving to next model...")
             continue
+    if args.only_tune:
+        print("[+] Parameter tuning completed for all models. Skipping evaluation loop.")
 
 
 if __name__ == "__main__":

@@ -67,7 +67,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def resolve_params_file(args: argparse.Namespace) -> str:
-    return f"result/debug_logs/{args.attack_type}/optimal_params.json"
+    param_filename = "optimal_params.json" if args.mode == "all" else f"{args.mode}_optimal_params.json"
+    return f"result/debug_logs/{args.attack_type}/{param_filename}"
 
 
 def apply_params_file(args: argparse.Namespace) -> argparse.Namespace:
@@ -174,10 +175,10 @@ def run_pipeline(code: str, lang: str, guardrails: GuardrailBundle, args: argpar
     current_code = code
     if args.mode in ("all", "l1"):
         result["Regex"], current_code, result["reg_debug"] = pipe["pre"].detect(code)
-    if args.mode in ("all", "l2"):
+    if args.mode in ("all", "l2") and not result["Regex"]:
         input_l2 = current_code if args.mode == "all" else code
         result["Adversarial"], current_code, result["adv_debug"] = pipe["adv"].detect(input_l2)
-    if args.mode in ("all", "l3"):
+    if args.mode in ("all", "l3") and not (result["Regex"] or result["Adversarial"]):
         input_l3 = current_code if args.mode == "all" else code
         result["Semantic"], current_code, result["sem_debug"] = pipe["sem"].detect(input_l3)
 
