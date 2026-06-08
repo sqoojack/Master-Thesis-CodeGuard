@@ -83,9 +83,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def objective_function(tp: int, fp: int, fn: int, tn: int, beta: float = 1.5) -> float:
-    fpr = fp / (fp + tn) if (tn + fp) > 0 else 0.0
     f_beta = f_beta_score(tp, fp, fn, beta=beta)
-    return float(f_beta * (1.0 - fpr))
+    return float(f_beta)
 
 
 def load_model_and_tokenizer(args: argparse.Namespace):
@@ -344,11 +343,11 @@ def default_param_candidates() -> list[dict[str, Any]]:
     return [
         {
             "th_adv": 16.0, "th_str": 15.0, "th_l3": 0.26, "t_l3": 0.01, "l3_min_surprise": 0.15, "l3_z_trigger": 3.5,
-            "th_s1_w": 50, "th_s1_str": 0.25, "th_s1_identifier": 0.35, "th_s1_comment": 0.45, "th_s1_error": 0.08, "th_s1_a": 0.001,
+            "th_s1_w": 400, "th_s1_str": 0.80, "th_s1_identifier": 0.80, "th_s1_comment": 0.90, "th_s1_error": 0.50, "th_s1_a": 0.05,
         },
         {
             "th_adv": 18.0, "th_str": 15.0, "th_l3": 0.26, "t_l3": 0.05, "l3_min_surprise": 0.20, "l3_z_trigger": 3.5,
-            "th_s1_w": 100, "th_s1_str": 0.35, "th_s1_identifier": 0.35, "th_s1_comment": 0.45, "th_s1_error": 0.08, "th_s1_a": 0.001,
+            "th_s1_w": 400, "th_s1_str": 0.80, "th_s1_identifier": 0.80, "th_s1_comment": 0.90, "th_s1_error": 0.50, "th_s1_a": 0.05,
         },
     ]
 
@@ -356,25 +355,25 @@ def default_param_candidates() -> list[dict[str, Any]]:
 def generate_param_candidates(seed: int, mode: str = "all") -> list[dict[str, Any]]:
     if mode == "all":
         spaces = {
-            "th_adv": np.arange(8.0, 20.1, 1.0),
-            "th_str": np.arange(8.0, 20.1, 1.0),
-            "th_l3": np.arange(0.20, 0.61, 0.05),
-            "t_l3": [0.10, 0.20],
-            "l3_min_surprise": [0.15, 0.25],
-            "l3_z_trigger": [2.0, 3.0],
-            "th_s1_w": [200, 400, 800],
-            "th_s1_str": [0.80, 1.20],
-            "th_s1_identifier": [0.80, 1.20],
-            "th_s1_comment": [0.90, 1.20],
-            "th_s1_error": [0.50, 1.20],
-            "th_s1_a": [0.05, 0.20],
+            "th_adv": np.arange(5.0, 17.1, 1.0),
+            "th_str": np.arange(5.0, 17.1, 1.0),
+            "th_l3": np.arange(0.10, 0.70, 0.05),
+            "t_l3": [0.01, 0.10],
+            "l3_min_surprise": [0.05, 0.15],
+            "l3_z_trigger": [1.5, 3.0],
+            "th_s1_w": [100, 200, 400],
+            "th_s1_str": [0.40, 0.80],
+            "th_s1_identifier": [0.40, 0.80],
+            "th_s1_comment": [0.60, 0.90],
+            "th_s1_error": [0.25, 0.50],
+            "th_s1_a": [0.01, 0.05],
         }
     else:
         # Optimize individual layer spaces by freezing inactive layer params
         spaces = {
-            "th_adv": np.arange(4.0, 16.1, 1.0) if mode == "l2" else [15.0],
-            "th_str": np.arange(4.0, 16.1, 1.0) if mode == "l2" else [12.0],
-            "th_l3": np.arange(0.10, 0.31, 0.05) if mode == "l3" else [0.3],
+            "th_adv": np.arange(10.0, 22.1, 1.0) if mode == "l2" else [15.0],
+            "th_str": np.arange(10.0, 22.1, 1.0) if mode == "l2" else [12.0],
+            "th_l3": np.arange(0.10, 0.41, 0.05) if mode == "l3" else [0.3],
             "t_l3": [0.10, 0.20] if mode == "l3" else [0.1],
             "l3_min_surprise": [0.15, 0.25] if mode == "l3" else [0.15],
             "l3_z_trigger": [2.0, 3.0] if mode == "l3" else [3.0],
@@ -401,33 +400,48 @@ def generate_param_candidates(seed: int, mode: str = "all") -> list[dict[str, An
 
 def select_best_params(v_data: dict[str, Any], candidates: list[dict[str, Any]], args: argparse.Namespace):
     train_mask, val_mask = mask_split(v_data, "train"), mask_split(v_data, "val")
-    best, fallback = None, None
+    best = None
+    fallback = None
+    max_fpr_constraint = 0.20
 
     for params in tqdm(candidates, desc="Search thresholds", ncols=100):
         train = simulate_pipeline_vectorized(v_data, params, train_mask, mode=args.mode)
         train_score = objective_function(train["tp"], train["fp"], train["fn"], train["tn"], args.beta)
         train_metrics = compute_metrics(train["tp"], train["fp"], train["fn"], train["tn"])
 
-        fallback_key = (train_score, train_metrics.recall, -train_metrics.fpr, train_metrics.precision)
-        if fallback is None or fallback_key > fallback["key"]:
-            fallback = {"params": params, "train": train, "train_score": train_score, "key": fallback_key}
-
-        if train_score < 0:
-            continue
-
         val = simulate_pipeline_vectorized(v_data, params, val_mask, mode=args.mode)
         val_score = objective_function(val["tp"], val["fp"], val["fn"], val["tn"], args.beta)
         val_metrics = compute_metrics(val["tp"], val["fp"], val["fn"], val["tn"])
-        train_key = (val_score, train_score, val_metrics.recall, -val_metrics.fpr, val_metrics.precision)
+
+        fallback_key = (-train_metrics.fpr, train_score, val_score)
+        if fallback is None or fallback_key > fallback["key"]:
+            fallback = {
+                "params": params,
+                "train": train,
+                "val": val,
+                "train_score": train_score,
+                "val_score": val_score,
+                "key": fallback_key
+            }
+
+        if train_metrics.fpr > max_fpr_constraint:
+            continue
+
+        train_key = (train_score, val_score, -train_metrics.fpr)
         if best is None or train_key > best["key"]:
-            best = {"params": params, "train": train, "val": val, "train_score": train_score, "val_score": val_score, "key": train_key}
+            best = {
+                "params": params,
+                "train": train,
+                "val": val,
+                "train_score": train_score,
+                "val_score": val_score,
+                "key": train_key
+            }
 
     if best is None:
-        print("[!] No candidate satisfied the train FPR constraint. Falling back to best train objective.")
-        best = {
-            "params": fallback["params"], "train": fallback["train"], "train_score": fallback["train_score"], "val_score": -1.0,
-            "val": simulate_pipeline_vectorized(v_data, fallback["params"], val_mask, mode=args.mode),
-        }
+        print("[!] No candidate satisfied the train FPR constraint. Falling back to lowest FPR template.")
+        best = fallback
+
     return best
 
 

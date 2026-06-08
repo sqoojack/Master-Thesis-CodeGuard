@@ -27,9 +27,9 @@ class SemanticGuardrail:
         self.min_surprise = getattr(args, "l3_min_surprise", 0.15)
         self.z_trigger_th = getattr(args, "l3_z_trigger", 3.5)
         self.max_ctx_threshold = getattr(args, "l3_max_ctx_threshold", 1.5)
-        self.top_k_candidates = getattr(args, "l3_top_k_candidates", 30)
-        self.prefix_window = getattr(args, "l3_prefix_window", 300)
-        self.suffix_window = getattr(args, "l3_suffix_window", 300)
+        self.top_k_candidates = getattr(args, "l3_top_k_candidates", 8)
+        self.prefix_window = getattr(args, "l3_prefix_window", 150)
+        self.suffix_window = getattr(args, "l3_suffix_window", 150)
         self.batch_size = getattr(args, "batch_size", 8)
         self.batch_token_budget = getattr(args, "batch_token_budget", 2048)
         self.whitelist = {
@@ -60,7 +60,17 @@ class SemanticGuardrail:
 
     def _losses_from_batch(self, input_ids, attention_mask):
         with torch.no_grad():
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            try:
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            except ValueError as exc:
+                if "shared_kv_states" in str(exc) and hasattr(self.model, "prepare_inputs_for_generation"):
+                    # Adapt for custom assistant model input structures
+                    model_inputs = self.model.prepare_inputs_for_generation(input_ids, attention_mask=attention_mask)
+                    if "attention_mask" not in model_inputs:
+                        model_inputs["attention_mask"] = attention_mask
+                    outputs = self.model(**model_inputs)
+                else:
+                    raise exc
             shift_logits = outputs.logits[..., :-1, :].contiguous()
             shift_labels = input_ids[..., 1:].contiguous()
             shift_mask = attention_mask[..., 1:].contiguous().bool()
@@ -211,12 +221,12 @@ class SemanticGuardrail:
         for node, type_name in captures:
             text = node.text.decode("utf8", errors="ignore")
             if type_name == "identifier":
-                if len(text) < 4 or text in self.whitelist:
+                if len(text) < 5 or text in self.whitelist:
                     continue
                 token_type = self.get_token_type(code_bytes, node, text)
                 is_noisy = self.is_noisy_variable(text) or (token_type == "MACRO" and re.fullmatch(r"[A-Z0-9_]{8,}", text) is not None)
             else:
-                if len(text) < 10:
+                if len(text) < 5:
                     continue
                 is_noisy = False
                 token_type = type_name.upper()

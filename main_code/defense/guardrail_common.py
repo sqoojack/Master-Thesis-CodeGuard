@@ -253,10 +253,19 @@ def node_kind(node_type: str, capture_name: str | None = None) -> str:
     return "other"
 
 
-def adjusted_special_ratio(text: str, kind: str) -> float:
-    syntax_count = sum(1 for c in text if c in SYNTAX_CHARS)
+def adjusted_special_ratio(text: str, kind: str, lang: str = "c") -> float:
+    lang_lower = lang.lower()
+    syntax_count = 0.0
+    for c in text:
+        if c in SYNTAX_CHARS:
+            if lang_lower in ("c", "cpp") and c in ("-", ">"):
+                syntax_count += 0.2
+            else:
+                syntax_count += 1.0
     risk_count = sum(1 for c in text if c in RISK_CHARS)
     syntax_weight = 0.5 if kind == "string" else 0.1
+    if lang_lower in ("c", "cpp") and kind != "string":
+        syntax_weight = 0.05
     adjusted_special_count = (syntax_count * syntax_weight) + risk_count
     return adjusted_special_count / (len(text) + 15.0)
 

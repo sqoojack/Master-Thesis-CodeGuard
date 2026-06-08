@@ -51,7 +51,17 @@ class AdversarialGuardrail:
 
     def _losses_from_batch(self, input_ids, attention_mask):
         with torch.no_grad():
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            try:
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            except ValueError as exc:
+                if "shared_kv_states" in str(exc) and hasattr(self.model, "prepare_inputs_for_generation"):
+                    # Adapt for custom assistant model input structures
+                    model_inputs = self.model.prepare_inputs_for_generation(input_ids, attention_mask=attention_mask)
+                    if "attention_mask" not in model_inputs:
+                        model_inputs["attention_mask"] = attention_mask
+                    outputs = self.model(**model_inputs)
+                else:
+                    raise exc
             shift_logits = outputs.logits[..., :-1, :].contiguous()
             shift_labels = input_ids[..., 1:].contiguous()
             shift_mask = attention_mask[..., 1:].contiguous().bool()
@@ -196,7 +206,7 @@ class AdversarialGuardrail:
         node_data = []
         for node, type_name in captures:
             text = node.text.decode("utf8", errors="ignore")
-            if len(text) < 10:
+            if len(text) < 5:
                 continue
             node_data.append({"node": node, "type": type_name, "text": text})
 

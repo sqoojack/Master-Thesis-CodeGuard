@@ -63,12 +63,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", type=str, default="all", choices=["all", "l1", "l2", "l3"], help="Select detection layer")
     parser.add_argument("--pull_tree_sitter", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
-
-    # Debug output. Disabled by default so benchmark latency is not affected.
-    parser.add_argument("--save_layer_debug", action="store_true", help="Write compact L1/L2/L3 debug summaries into sanitized_data")
-    parser.add_argument("--save_l3_logits_debug", action="store_true", help="For L3-detected samples, recompute logits summaries for adv_code vs repaired_code")
-    parser.add_argument("--logit_debug_top_k", type=int, default=5, help="Number of top tokens saved for logits summaries")
-    parser.add_argument("--logit_debug_max_length", type=int, default=2048, help="Max tokens used when recomputing logits debug summaries")
     return parser
 
 
@@ -196,184 +190,6 @@ def is_detected(result: LayerResult) -> bool:
     return bool(result["Regex"] or result["Adversarial"] or result["Semantic"])
 
 
-def make_json_safe(value: Any) -> Any:
-    """Convert common debug objects into JSON-safe values."""
-    if isinstance(value, torch.Tensor):
-        if value.numel() == 1:
-            return value.detach().cpu().item()
-        return value.detach().cpu().tolist()
-    if isinstance(value, dict):
-        return {str(k): make_json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [make_json_safe(v) for v in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def find_first_by_keys(obj: Any, key_names: set[str]) -> Any:
-    """Recursively find the first value whose key matches key_names."""
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if str(key).lower() in key_names:
-                return make_json_safe(value)
-        for value in obj.values():
-            found = find_first_by_keys(value, key_names)
-            if found is not None:
-                return found
-    elif isinstance(obj, (list, tuple)):
-        for value in obj:
-            found = find_first_by_keys(value, key_names)
-            if found is not None:
-                return found
-    return None
-
-
-def summarize_layer_debug(debug: Any, layer: str) -> dict[str, Any]:
-    """Extract compact, presentation-friendly debug fields."""
-    if not debug:
-        return {}
-
-    common_keys = {
-        "score": {"score", "final_score", "anomaly_score", "threat_score"},
-        "threshold": {"threshold", "tau", "th", "trigger_threshold"},
-        "node_type": {"node_type", "type", "syntax_type"},
-        "node_text": {"node_text", "text", "candidate", "trigger", "trigger_text"},
-    }
-    l2_keys = {
-        "max_loss": {"max_loss", "max_nll", "topk_loss", "min_k_score"},
-        "dynamic_k": {"dynamic_k", "k", "k_percent"},
-        "entropy": {"entropy", "relative_entropy"},
-        "max_spike": {"max_spike", "spike", "local_spike"},
-    }
-    l3_keys = {
-        "influence_score": {"influence", "influence_score", "delta", "logit_delta", "distance", "logits_distance"},
-        "surprise_score": {"surprise", "surprise_score"},
-        "replacement": {"replacement", "neutral", "mutated_text", "neutral_text"},
-        "original_logits": {"original_logits", "logits_before", "before_logits", "orig_logits"},
-        "mutated_logits": {"mutated_logits", "logits_after", "after_logits", "neutral_logits"},
-    }
-
-    keys = dict(common_keys)
-    if layer == "L2":
-        keys.update(l2_keys)
-    if layer == "L3":
-        keys.update(l3_keys)
-
-    summary = {name: find_first_by_keys(debug, aliases) for name, aliases in keys.items()}
-    return {k: v for k, v in summary.items() if v is not None}
-
-
-def last_position_logits(code: str, model, tokenizer, device, *, top_k: int, max_length: int) -> tuple[torch.Tensor, dict[str, Any]]:
-    """Return the final-position logits and a compact summary."""
-    if not code:
-        raise ValueError("Cannot compute logits for empty code")
-
-    tokenizer_max_len = getattr(tokenizer, "model_max_length", max_length)
-    if not isinstance(tokenizer_max_len, int) or tokenizer_max_len <= 0 or tokenizer_max_len > 100000:
-        tokenizer_max_len = max_length
-    effective_max_len = min(max_length, tokenizer_max_len)
-
-    inputs = tokenizer(
-        code,
-        return_tensors="pt",
-        truncation=True,
-        max_length=effective_max_len,
-    )
-    inputs = {key: value.to(device) for key, value in inputs.items()}
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits[0, -1].detach().float().cpu()
-
-    probs = torch.softmax(logits, dim=-1)
-    k = min(top_k, probs.numel())
-    top_probs, top_ids = torch.topk(probs, k=k)
-    top_logits = logits[top_ids]
-    top_tokens = tokenizer.convert_ids_to_tokens(top_ids.tolist())
-    entropy = -(probs * torch.log(probs.clamp_min(1e-12))).sum().item()
-
-    summary = {
-        "entropy": round(entropy, 6),
-        "max_logit": round(float(logits.max().item()), 6),
-        "mean_logit": round(float(logits.mean().item()), 6),
-        "std_logit": round(float(logits.std(unbiased=False).item()), 6),
-        "top_tokens": [
-            {
-                "token": token,
-                "logit": round(float(logit.item()), 6),
-                "prob": round(float(prob.item()), 8),
-            }
-            for token, logit, prob in zip(top_tokens, top_logits, top_probs)
-        ],
-    }
-    return logits, summary
-
-
-def compare_logits_for_repair(original_code: str, repaired_code: str, model, tokenizer, device, args: argparse.Namespace) -> dict[str, Any]:
-    """Compare original adv_code and final repaired_code at the final logits position."""
-    original_logits, original_summary = last_position_logits(
-        original_code,
-        model,
-        tokenizer,
-        device,
-        top_k=args.logit_debug_top_k,
-        max_length=args.logit_debug_max_length,
-    )
-    repaired_logits, repaired_summary = last_position_logits(
-        repaired_code,
-        model,
-        tokenizer,
-        device,
-        top_k=args.logit_debug_top_k,
-        max_length=args.logit_debug_max_length,
-    )
-
-    original_probs = torch.softmax(original_logits, dim=-1)
-    repaired_probs = torch.softmax(repaired_logits, dim=-1)
-    midpoint = 0.5 * (original_probs + repaired_probs)
-    kl_orig_mid = torch.sum(original_probs * (torch.log(original_probs.clamp_min(1e-12)) - torch.log(midpoint.clamp_min(1e-12))))
-    kl_rep_mid = torch.sum(repaired_probs * (torch.log(repaired_probs.clamp_min(1e-12)) - torch.log(midpoint.clamp_min(1e-12))))
-    js_div = 0.5 * (kl_orig_mid + kl_rep_mid)
-    cosine_sim = torch.nn.functional.cosine_similarity(original_logits, repaired_logits, dim=0)
-
-    return {
-        "scope": "adv_code_vs_repaired_code_final_position",
-        "original_logits_summary": original_summary,
-        "repaired_logits_summary": repaired_summary,
-        "distances": {
-            "logit_l2": round(float(torch.linalg.vector_norm(original_logits - repaired_logits).item()), 6),
-            "mean_abs_logit_delta": round(float(torch.mean(torch.abs(original_logits - repaired_logits)).item()), 6),
-            "cosine_distance": round(float((1.0 - cosine_sim).item()), 6),
-            "js_divergence": round(float(js_div.item()), 8),
-        },
-    }
-
-
-def build_detection_debug_payload(adv_code: str, adv_result: LayerResult, model, tokenizer, device, args: argparse.Namespace) -> dict[str, Any]:
-    """Build optional debug metadata for sanitized_data output."""
-    payload: dict[str, Any] = {
-        "L1": summarize_layer_debug(adv_result.get("reg_debug"), "L1"),
-        "L2": summarize_layer_debug(adv_result.get("adv_debug"), "L2"),
-        "L3": summarize_layer_debug(adv_result.get("sem_debug"), "L3"),
-    }
-
-    if args.save_l3_logits_debug and adv_result.get("Semantic"):
-        try:
-            payload["L3"]["logits_debug"] = compare_logits_for_repair(
-                adv_code,
-                adv_result.get("final_code", adv_code),
-                model,
-                tokenizer,
-                device,
-                args,
-            )
-        except Exception as exc:
-            payload["L3"]["logits_debug_error"] = str(exc)
-
-    return payload
-
-
 def empty_stats() -> Stats:
     return {
         "TP": 0,
@@ -419,7 +235,7 @@ def evaluate_adversarial(entry: dict[str, Any], guardrails: GuardrailBundle, arg
     return code, result, time.perf_counter() - start
 
 
-def process_dataset(input_path: str, output_path: str, debug_dir: str, guardrails: GuardrailBundle, args: argparse.Namespace, model=None, tokenizer=None, device=None) -> tuple[Stats, float, int]:
+def process_dataset(input_path: str, output_path: str, debug_dir: str, guardrails: GuardrailBundle, args: argparse.Namespace) -> tuple[Stats, float, int]:
     stats = empty_stats()
     total_latency = 0.0
     processed_count = 0
@@ -463,25 +279,17 @@ def process_dataset(input_path: str, output_path: str, debug_dir: str, guardrail
                 stats["FN"] += 1
                 fn_log.write(json.dumps({"id": stats["total_adv"], "code": adv_code, "debug": adv_result}, cls=NumpyEncoder) + "\n")
 
-            output_update = {
-                "repaired_code": adv_result["final_code"],
-                "defense_detected": detected,
-                "layer_triggers": {
-                    "L1": adv_result.get("Regex"),
-                    "L2": adv_result.get("Adversarial"),
-                    "L3": adv_result.get("Semantic"),
-                },
-            }
-            if args.save_layer_debug or args.save_l3_logits_debug:
-                output_update["detection_debug"] = build_detection_debug_payload(
-                    adv_code,
-                    adv_result,
-                    model,
-                    tokenizer,
-                    device,
-                    args,
-                )
-            entry.update(output_update)
+            entry.update(
+                {
+                    "repaired_code": adv_result["final_code"],
+                    "defense_detected": detected,
+                    "layer_triggers": {
+                        "L1": adv_result.get("Regex"),
+                        "L2": adv_result.get("Adversarial"),
+                        "L3": adv_result.get("Semantic"),
+                    },
+                }
+            )
             out_f.write(json.dumps(entry, cls=NumpyEncoder) + "\n")
 
     return stats, total_latency, processed_count
@@ -525,7 +333,7 @@ def main() -> None:
     model, tokenizer, device = load_model_and_tokenizer(args)
     guardrails = build_guardrails(args, model, tokenizer, device)
 
-    stats, total_latency, processed_count = process_dataset(input_path, output_path, debug_dir, guardrails, args, model, tokenizer, device)
+    stats, total_latency, processed_count = process_dataset(input_path, output_path, debug_dir, guardrails, args)
     metrics_report = build_metrics_report(stats, total_latency, processed_count, args)
     write_metrics(eval_dir, metrics_report, args)
 

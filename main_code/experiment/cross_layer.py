@@ -1,4 +1,4 @@
-# python main_code/experiment/cross_layer.py --modes_to_test l1 l2 l3 --run_param --attack_type Merged_all --gpu_id 1 --threshold_beta 1.0
+# python main_code/experiment/cross_layer.py --modes_to_test l1 l2 l3 --run_param --attack_type Merged_all --gpu_id 0 --threshold_beta 4.0
 import os
 import sys
 import json

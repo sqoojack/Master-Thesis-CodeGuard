@@ -8,9 +8,9 @@ Test models:
 Example:
 python main_code/experiment/cross_model.py --attack_type Tranfer_2_codegen --gpu_id 0
 python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 0 --run_paras --threshold_beta 1.5
-python main_code/experiment/cross_model.py --attack_type CoTDeceptor --gpu_id 1 
-python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id 1 --run_paras
-python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 1 --run_paras --threshold_beta 1.0
+python main_code/experiment/cross_model.py --attack_type Flashboom --gpu_id 0 --run_paras --threshold_beta 4.0 -bs 32 --threshold_num_samples 300
+python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id 0 --threshold_beta 4.0 -bs 32
+python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 1 --run_paras --threshold_beta 4.0 -bs 32 --threshold_num_samples 300
 """
 
 import os
@@ -65,6 +65,7 @@ def build_command(
         str(batch_size),
         "--batch_token_budget",
         str(batch_token_budget),
+        "--save_l3_logits_debug",
     ]
 
 
@@ -195,7 +196,7 @@ def run_cross_model_eval() -> None:
     parser.add_argument(
         "--threshold_num_samples",
         type=int,
-        default=300,
+        default=400,
         help="Number of samples for dynamic_threshold.py when optimal_params.json is missing.",
     )
     parser.add_argument(
@@ -223,14 +224,13 @@ def run_cross_model_eval() -> None:
     args = parser.parse_args()
 
     models_to_test = [
-        # "google/gemma-4-31B-it-assistant",
         # "Qwen/Qwen3.5-0.8B",
         "Salesforce/codegen-350M-multi",
         # "Qwen/Qwen3.5-4B",
         # "mistralai/Ministral-3-3B-Base-2512",
         # "mistralai/Ministral-3-3B-Instruct-2512",
         # "mistralai/Ministral-3-3B-Reasoning-2512",
-        # "google/gemma-4-E4B",
+        # "google/gemma-4-E4B",   # base模型, 較it版本佳
         # "google/gemma-4-E4B-it",
         # "mistralai/Mistral-7B-Instruct-v0.3"
     ]

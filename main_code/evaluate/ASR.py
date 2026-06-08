@@ -1,8 +1,14 @@
 """
 Execution command example:
     CUDA_VISIBLE_DEVICES=0 python main_code/evaluate/ASR.py \
---model_choice 8 \
---data_path result/sanitized_data/tiny_test_merged/all_CodeGuard.jsonl
+--model_choice 6 \
+--data_path result/sanitized_data/tiny_test_merged/all_CodeGuard.jsonl \
+--batch_size 2
+
+    CUDA_VISIBLE_DEVICES=0 python main_code/evaluate/ASR.py \
+--model_choice 3 \
+--data_path result/sanitized_data/Merged_all/all_CodeGuard.jsonl \
+--batch_size 8
 """
 import argparse
 import json
@@ -35,7 +41,8 @@ except ImportError:
 DEFAULT_REGISTRY = {
     1: "mistralai/Ministral-3-3B-Base-2512",
     2: "mistralai/Mistral-7B-Instruct-v0.3",
-    3: "Qwen/Qwen3.5-0.8B",
+    # 3: "Qwen/Qwen3.5-0.8B",
+    3: "Qwen/Qwen2.5-Coder-7B-Instruct",
     4: "google/gemma-4-E4B",
     5: "google/gemma-4-E4B-it",
     6: "openai/gpt-5.1-codex-mini",
@@ -298,58 +305,6 @@ def normalize_language_name(lang):
         return "java"
     return ""
 
-
-def get_code_fence_language(text):
-    """Read language tag from the first markdown code fence."""
-    match = re.search(r"```([A-Za-z0-9_+#.-]+)?\s*\n", text or "")
-    if not match:
-        return ""
-    return normalize_language_name(match.group(1))
-
-
-def infer_language(code):
-    """Infer language from prompt/code context."""
-    code = code or ""
-    fence_lang = get_code_fence_language(code)
-    if fence_lang:
-        return fence_lang
-
-    lowered = code.lower()
-    if "pragma solidity" in lowered or re.search(r"\bcontract\s+\w+", code):
-        return "solidity"
-
-    if (
-        "public static " in code
-        or "import java." in code
-        or "java.io." in code
-        or re.search(r"\bthrows\s+\w+", code)
-        or re.search(r"\bString\s+\w+\s*\(", code)
-    ):
-        return "java"
-
-    if (
-        "#include" in code
-        or re.search(r"\b(uint\d+_t|int\d+_t|size_t|FILE|char\s*\*|struct\s+\w+)\b", code)
-        or re.search(r"\b(static\s+)?(int|void|bool|char|float|double|long)\s+\*?\s*\w+\s*\(", code)
-        or "->" in code
-    ):
-        return "cpp"
-
-    return "python"
-
-
-def infer_language_from_output(output_text, fallback_text=""):
-    """Prefer explicit output fence language, then infer from generated code, then prompt."""
-    fence_lang = get_code_fence_language(output_text)
-    if fence_lang:
-        return fence_lang
-    code = extract_code_block(output_text)
-    inferred = infer_language(code)
-    if inferred != "python" or re.search(r"\bdef\s+\w+\s*\(", code):
-        return inferred
-    return infer_language(fallback_text)
-
-
 def extract_code_block(output_text):
     """Extract the first markdown code block. Handles unfinished fences from truncated generations."""
     output_text = output_text or ""
@@ -426,7 +381,7 @@ def evaluate_batch_results(adv_outputs, repaired_outputs, batch_records):
         adv_out = (adv_outputs[idx] or "").strip()
         rep_out = (repaired_outputs[idx] or "").strip()
         original_code = record.get("adv_code_prompt", "") or record.get("adv_code", "")
-        prompt_lang = infer_language(original_code)
+        prompt_lang = normalize_language_name(record.get("language", "python"))
 
         record["eval_language"] = prompt_lang
 
@@ -452,7 +407,7 @@ def evaluate_batch_results(adv_outputs, repaired_outputs, batch_records):
                 record[f"{prefix}_eval_reason"] = "empty_code_block"
                 return False
 
-            out_lang = infer_language_from_output(output_text, original_code)
+            out_lang = normalize_language_name(record.get("language", "python"))
             record[f"{prefix}_eval_language"] = out_lang
 
             if not is_reasonable_completion_fragment(code_block, out_lang):
@@ -566,7 +521,7 @@ def main():
     parser = argparse.ArgumentParser(description="Academic Rigorous ASR Evaluator Pipeline.")
     parser.add_argument("--data_path", type=str, required=True, help="Input JSONL path.")
     parser.add_argument("--model_choice", type=int, required=True, choices=list(DEFAULT_REGISTRY.keys()), help="Target Model ID.")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batching throughput capacity modifier.")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batching throughput capacity modifier.")
     parser.add_argument("--max_new_tokens", type=int, default=512, help="Token optimization length constraint.")
     args = parser.parse_args()
 
@@ -668,8 +623,8 @@ def main():
             record["model_output"] = model_outputs[idx]
             record["repaired_code_model_output"] = repaired_model_outputs[idx]
 
-    nonempty_adv = sum(1 for r in records if r.get("model_output", "").strip())
-    nonempty_rep = sum(1 for r in records if r.get("repaired_code_model_output", "").strip())
+    nonempty_adv = sum(1 for r in records if (r.get("model_output") or "").strip())
+    nonempty_rep = sum(1 for r in records if (r.get("repaired_code_model_output") or "").strip())
     print(f"[Debug] Non-empty outputs: adv={nonempty_adv}/{total_records}, repaired={nonempty_rep}/{total_records}")
 
     if model is not None:
