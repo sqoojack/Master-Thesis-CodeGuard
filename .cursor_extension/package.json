@@ -1,0 +1,31 @@
+{
+    "name": "hipert-guardrail",
+    "displayName": "HiPert Guardrail Integration",
+    "description": "Sanitize code blocks via HiPert defense framework using subprocess pipes",
+    "version": "1.0.0",
+    "engines": {
+      "vscode": "^1.75.0"
+    },
+    "categories": [
+      "Linters",
+      "Security"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+      "commands": [
+        {
+          "command": "hipert-guardrail.sanitizeSelection",
+          "title": "HiPert: Sanitize Selected Code"
+        }
+      ],
+      "menus": {
+        "editor/context": [
+          {
+            "command": "hipert-guardrail.sanitizeSelection",
+            "group": "modification",
+            "when": "editorHasSelection"
+          }
+        ]
+      }
+    }
+  }

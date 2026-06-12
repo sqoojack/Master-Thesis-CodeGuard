@@ -10,6 +10,7 @@ python main_code/experiment/cross_model.py --attack_type Tranfer_2_codegen --gpu
 python main_code/experiment/cross_model.py --attack_type XOXO --gpu_id 0 --run_paras --threshold_beta 1.5
 python main_code/experiment/cross_model.py --attack_type Flashboom --gpu_id 0 --run_paras --threshold_beta 4.0 -bs 32 --threshold_num_samples 300
 python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id 0 --threshold_beta 4.0 -bs 32
+python main_code/experiment/cross_model.py --attack_type tiny_test_merged --gpu_id "" --threshold_beta 4.0 -bs 32
 python main_code/experiment/cross_model.py --attack_type Merged_all --gpu_id 1 --run_paras --threshold_beta 4.0 -bs 32 --threshold_num_samples 300
 """
 
