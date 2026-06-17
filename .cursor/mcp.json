@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+      "hipert-sanitize-server": {
+        "command": "/home/jack/anaconda3/envs/Thesis/bin/python",
+        "args": [
+          "-u",
+          "/home/jack/Thesis_topic/main_code/deploy/mcp_server.py"
+        ]
+      }
+    }
+  }

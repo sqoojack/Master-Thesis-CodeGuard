@@ -4,6 +4,10 @@ import argparse
 import json
 import os
 
+# Redirect stdout to stderr during initialization to prevent protocol pollution
+original_stdout = sys.stdout
+sys.stdout = sys.stderr
+
 # Resolve path issues so it can find defense module and its dependencies
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
@@ -25,6 +29,9 @@ from main import (
     build_guardrails,
     run_pipeline
 )
+
+# Import language normalization utility to secure input coupling
+from guardrail_common import normalize_language
 
 # Initialize the defense framework components globally
 print("Initializing HiPert defense framework components...", file=sys.stderr)
@@ -77,8 +84,11 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
     raw_code = arguments["code"]
     language = arguments["language"]
 
-    print(f"Processing inbound tool request for language: {language}", file=sys.stderr)
-    pipeline_result = run_pipeline(raw_code, language, guardrails, args)
+    # Normalize language string to match the internal guardrail keys perfectly
+    normalized_lang = normalize_language(language, raw_code, args.default_lang)
+
+    print(f"Processing inbound tool request for language: {normalized_lang}", file=sys.stderr)
+    pipeline_result = run_pipeline(raw_code, normalized_lang, guardrails, args)
     sanitized_output = pipeline_result.get("final_code", raw_code)
 
     return [
@@ -90,6 +100,9 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 
 async def main():
     """Run the MCP server over standard input/output streams."""
+    # Restore stdout right before starting the MCP stdio communication
+    sys.stdout = original_stdout
+
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
